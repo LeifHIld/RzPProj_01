@@ -1,0 +1,56 @@
+/* Payday Mini App (план 011). Цвета — только официальные переменные Telegram (--tg-theme-*):
+   светлая и тёмная тема подстраиваются сами. Значения после запятой — для обычного браузера. */
+:root {
+  color-scheme: light dark;
+  --bg: var(--tg-theme-secondary-bg-color, #efeff3);
+  --section: var(--tg-theme-section-bg-color, var(--tg-theme-bg-color, #ffffff));
+  --text: var(--tg-theme-text-color, #000000);
+  --hint: var(--tg-theme-hint-color, #8e8e93);
+  --link: var(--tg-theme-link-color, #2481cc);
+  --accent: var(--tg-theme-button-color, #2481cc);
+  --accent-text: var(--tg-theme-button-text-color, #ffffff);
+  --danger: var(--tg-theme-destructive-text-color, #cc2929);
+  --up: #31b545;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--text); }
+body {
+  font: 15px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  padding: 12px 12px calc(16px + env(safe-area-inset-bottom));
+}
+.app { max-width: 520px; margin: 0 auto; display: flex; flex-direction: column; gap: 10px; }
+.sec { background: var(--section); border-radius: 12px; padding: 12px 14px; }
+.cap { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--hint); margin-bottom: 6px; }
+.big { font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.sub { color: var(--hint); font-size: 14px; }
+.sub b { color: var(--text); }
+.row2 { display: flex; justify-content: space-between; gap: 8px; font-size: 14px; padding: 2px 0;
+  font-variant-numeric: tabular-nums; }
+.row2 b { white-space: nowrap; }
+.up { color: var(--up); }
+.down { color: var(--danger); }
+.seg { display: grid; grid-template-columns: 1fr 1fr; background: var(--bg); border-radius: 9px; padding: 2px;
+  margin-bottom: 10px; border: 0; width: 100%; }
+.seg button { font: inherit; font-size: 13px; font-weight: 500; padding: 6px 0; border: 0; border-radius: 7px;
+  background: transparent; color: var(--hint); cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--section); color: var(--text); box-shadow: 0 1px 2px rgba(0, 0, 0, .15); }
+.bars { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; align-items: end; height: 140px; }
+.bar { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; gap: 4px; }
+.bar i { display: block; width: 100%; min-height: 3px; border-radius: 6px 6px 3px 3px;
+  background: color-mix(in srgb, var(--accent) 35%, transparent); }
+.bar.best i { background: var(--accent); }
+.bar.few i { background: color-mix(in srgb, var(--hint) 25%, transparent); }
+.bar .v { font-size: 10px; white-space: nowrap; color: var(--hint); font-variant-numeric: tabular-nums; }
+.bar.best .v { color: var(--text); font-weight: 600; }
+.days { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; text-align: center; font-size: 12px;
+  color: var(--hint); margin-top: 4px; }
+.note { font-size: 13px; color: var(--hint); margin-top: 8px; }
+.btn { display: block; width: 100%; font: inherit; font-weight: 600; text-align: center; padding: 12px;
+  border: 0; border-radius: 10px; cursor: pointer; }
+.btn.main { background: var(--accent); color: var(--accent-text); }
+.btn.second { background: var(--section); color: var(--link); }
+.btn:active { opacity: .8; }
+.empty { text-align: center; padding: 34px 16px; }
+.empty .ico { font-size: 34px; }
+.empty .sub { margin-top: 6px; }
