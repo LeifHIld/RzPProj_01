@@ -11,6 +11,8 @@
     "октябрь", "ноябрь", "декабрь"];
   var GENITIVE = ["", "января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября",
     "октября", "ноября", "декабря"];
+  var PREPOSITIONAL = ["", "январе", "феврале", "марте", "апреле", "мае", "июне", "июле", "августе", "сентябре",
+    "октябре", "ноябре", "декабре"];
   var DATIVE = ["", "январю", "февралю", "марту", "апрелю", "маю", "июню", "июлю", "августу", "сентябрю",
     "октябрю", "ноябрю", "декабрю"];
   var WD = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
@@ -79,9 +81,16 @@
     if (!(p.v === "1" && d.year && d.gross !== null && d.net !== null && d.w && d.i && d.c)) return null;
     var dt = /^(\d{4})-(\d{2})-(\d{2})$/.exec(p.dt || "");
     d.todayDay = dt && +dt[1] === d.year && +dt[2] === d.month ? +dt[3] : null;
-    d.cal = [{ key: "cur", year: d.year, month: d.month, gross: d.gross, net: d.net, paid: num(p.p), shifts: shifts(p.s) }];
+    // план 014: тарифы месяца (часы, обычная, алко<100, алко>100, МП, МЕ) и итоги для «Подробнее о месяце»
+    function card(pre) {
+      return { kc: num(p[pre + "kc"]), km: num(p[pre + "km"]), hp: num(p[pre + "hp"]), mh: num(p[pre + "mh"]) };
+    }
+    d.dh = num(p.dh) !== null ? num(p.dh) : 12;
+    d.cal = [{ key: "cur", year: d.year, month: d.month, gross: d.gross, net: d.net, paid: num(p.p), shifts: shifts(p.s),
+      rates: list(p.r, 6), card: card("") }];
     if (pym && num(p.pg) !== null && num(p.pn) !== null) {
-      d.cal.unshift({ key: "prev", year: +pym[1], month: +pym[2], gross: num(p.pg), net: num(p.pn), paid: num(p.pp), shifts: shifts(p.ps) });
+      d.cal.unshift({ key: "prev", year: +pym[1], month: +pym[2], gross: num(p.pg), net: num(p.pn), paid: num(p.pp),
+        shifts: shifts(p.ps), rates: list(p.pr, 6), card: card("p") });
     }
     return d;
   }
@@ -102,7 +111,10 @@
     m.shifts.forEach(function (s) { byDay[s.d] = s; sum += s.t; if (!best || s.t > best.t) best = s; });
     var avg = m.shifts.length ? sum / m.shifts.length : 0;
     var sel = state.sel[m.key];
-    if (sel === undefined) sel = today && byDay[today] ? today : m.shifts.length ? m.shifts[m.shifts.length - 1].d : today;
+    if (sel === undefined) {
+      sel = today && byDay[today] ? today : m.shifts.length ? m.shifts[m.shifts.length - 1].d : today;
+      if (sel) state.sel[m.key] = sel;   // чтобы «✏️ Изменить» знал, какой день выбран
+    }
 
     var h = '<section class="sec"><div class="calhead">' +
       '<button type="button" data-nav="prev" aria-label="Прошлый месяц"' + (isCur && d.cal.length > 1 ? "" : " disabled") + ">‹</button>" +
@@ -115,6 +127,18 @@
       h += '<div class="sub center">💳 на карту ' + fmt(m.paid) + " · " +
         (Math.abs(diff) < 0.005 ? "сошлось" : "разница " + signed(diff, 2)) + "</div>";
     }
+    // план 014: «💳 Пришло на карту» за показанный месяц и «Подробнее о месяце»
+    if (state.payOpen === m.key) {
+      h += '<div class="payform"><input id="pay-amount" type="number" inputmode="decimal" min="0" step="0.01" ' +
+        'placeholder="Сколько пришло, грн" value="' + (m.paid !== null ? m.paid : "") + '">' +
+        '<button type="button" class="btn main" data-act="pay-save"' + (d.bot ? "" : " disabled") + ">Сохранить</button></div>" +
+        '<div class="note">Откроется чат — бот покажет сверку с «чистыми», записывает по ✅.</div>';
+    } else {
+      h += '<button type="button" class="field" data-act="pay-open"><span>💳 Пришло на карту за ' + MONTHS[m.month] + "</span><b>" +
+        (m.paid !== null ? "изменить" : "ввести") + "</b></button>";
+    }
+    h += '<button type="button" class="more" data-act="mmore">' + (state.monthOpen ? "Свернуть ▴" : "Подробнее о месяце ▾") + "</button>";
+    if (state.monthOpen) h += monthCard(m);
     h += "</section>";
 
     var cells = WD.map(function (w) { return '<span class="wd">' + w + "</span>"; }).join("");
@@ -133,21 +157,141 @@
 
     if (sel) {
       var ss = byDay[sel], wdName = cap(WD_FULL[wdIndex(m.year, m.month, sel)]);
+      var future = isFuture(d, m, sel), editing = state.form && state.form.key === m.key && state.form.day === sel;
       var title = wdName + ", " + two(sel) + "." + two(m.month) + (sel === today ? " · сегодня" : "") +
         (ss && best && ss.d === best.d && m.shifts.length > 1 ? " · лучшая смена месяца" : "");
       h += '<section class="sec"><div class="cap">' + esc(title) + "</div>";
-      if (ss) {
+      if (editing) {
+        h += formBlock(d, m);
+      } else if (ss) {
         var pct = avg ? (ss.t / avg - 1) * 100 : 0;
         h += '<div class="row2"><span>Заработано</span><b>' + fmt(ss.t) + " грн</b></div>" +
           '<div class="row2"><span>' + ss.r + " · " + ss.as + "/" + ss.ab + " · " + ss.mp + " · " + ss.me + " · " +
           ss.h.toLocaleString("ru-RU") + ' ч</span><b class="' + (pct > 0.5 ? "up" : pct < -0.5 ? "down" : "") + '">' +
           signed(pct) + " % к средней</b></div>";
+        if (state.dayOpen) h += breakdown(ss, m.rates);
+        h += '<div class="row2"><button type="button" class="more" data-act="dmore">' + (state.dayOpen ? "Свернуть ▴" : "Подробнее ▾") +
+          '</button><button type="button" class="more" data-act="edit"' + (d.bot ? "" : " disabled") + ">✏️ Изменить</button></div>";
+      } else if (future) {
+        h += '<div class="sub">Этот день ещё не наступил</div>';
       } else {
-        h += '<div class="sub">Смены нет</div>';
+        h += '<div class="sub">Смены нет</div>' + (d.bot ? '<button type="button" class="more" data-act="edit">➕ Добавить смену на этот день</button>' : "");
       }
       h += "</section>";
     }
     return h;
+  }
+
+  /* ---------- подробности (план 014, G-002 б) ---------- */
+  function breakdown(s, r) {
+    if (!r) return '<div class="note">Тарифов в ссылке нет — откройте страницу заново из бота.</div>';
+    var alco = s.as * r[2] + s.ab * r[3], rows = [], total = 0;
+    rows.push(["Обычная", s.r + " × " + nice(r[1]), s.r * r[1]]);
+    rows.push(["Алко-чек", s.as + "×" + nice(r[2]) + " + " + s.ab + "×" + nice(r[3]), alco]);
+    rows.push(["МП", s.mp + " × " + nice(r[4]), s.mp * r[4]]);
+    rows.push(["МЕ", s.me + " × " + nice(r[5]), s.me * r[5]]);
+    rows.push(["Часы", s.h.toLocaleString("ru-RU") + " × " + nice(r[0]), s.h * r[0]]);
+    rows.forEach(function (x) { total += x[2]; });
+    var html = '<table class="tbl">' + rows.map(function (x) {
+      return "<tr><td>" + x[0] + '</td><td class="m">' + x[1] + "</td><td>" + fmt(x[2]) + "</td></tr>";
+    }).join("") + "</table>";
+    if (Math.abs(total - s.t) > 1) html += '<div class="note">Тарифы в этом месяце менялись — расшифровка по тарифам на конец месяца.</div>';
+    return html;
+  }
+  function nice(x) { return Number(x.toFixed(2)).toLocaleString("ru-RU").replace(",", "."); }
+  function monthCard(m) {
+    var c = m.card || {}, km = c.km || 0, hp = c.hp || 0, piece = m.gross - km - hp;
+    var hours = m.shifts.reduce(function (a, s) { return a + s.h; }, 0);
+    return '<div class="mcard"><div class="row2"><span>Сдельно (выдачи и чеки)</span><b>' + fmt(piece) + " грн</b></div>" +
+      '<div class="row2"><span>Часы · ' + (c.mh !== null && c.mh !== undefined ? nice(c.mh) + " — введено" : nice(hours) + " — по сменам") +
+      "</span><b>" + fmt(hp) + " грн</b></div>" +
+      '<div class="row2"><span>Приём и курьер · ' + fmt(c.kc || 0) + " " + plural(c.kc || 0, "посылка", "посылки", "посылок") +
+      "</span><b>" + fmt(km) + " грн</b></div>" +
+      '<div class="row2 sub"><span>ПДФО 18 % · военный сбор 5 %</span><span>−' + fmt(m.gross - m.net) + " грн</span></div></div>";
+  }
+
+  /* ---------- ввод прямо в календаре (план 014, G-005 б) ---------- */
+  var FIELDS = [["r", "Обычная выдача", 1], ["as", "Алко-чек <100", 2], ["ab", "Алко-чек >100", 3], ["mp", "МП", 4],
+    ["me", "МЕ", 5], ["h", "Часы", 0]];
+  function isFuture(d, m, day) {
+    var dt = /^(\d{4})-(\d{2})-(\d{2})$/.exec(d.date || "");
+    if (!dt) return false;
+    var a = m.year * 10000 + m.month * 100 + day, b = +dt[1] * 10000 + +dt[2] * 100 + +dt[3];
+    return a > b;
+  }
+  function formTotal(v, r) {
+    if (!r) return null;
+    return v.r * r[1] + v.as * r[2] + v.ab * r[3] + v.mp * r[4] + v.me * r[5] + v.h * r[0];
+  }
+  function formBlock(d, m) {
+    var v = state.form.vals, total = formTotal(v, m.rates);
+    var html = FIELDS.map(function (f) {
+      var rate = m.rates ? nice(m.rates[f[2]]) + (f[0] === "h" ? " грн/ч" : " грн") : "";
+      return '<div class="step"><span>' + esc(f[1]) + "<small>" + rate + '</small></span><span class="ctl">' +
+        '<button type="button" data-step="' + f[0] + '" data-d="-1" aria-label="Меньше">−</button>' +
+        '<input type="number" inputmode="decimal" min="0" step="' + (f[0] === "h" ? "0.5" : "1") + '" data-field="' + f[0] +
+        '" value="' + v[f[0]] + '" aria-label="' + esc(f[1]) + '">' +
+        '<button type="button" data-step="' + f[0] + '" data-d="1" aria-label="Больше">+</button></span></div>';
+    }).join("");
+    html += '<div class="row2"><span>Итого за смену</span><b id="form-total">' + (total !== null ? fmt(total) + " грн" : "—") + "</b></div>" +
+      '<button type="button" class="btn main" data-act="save-shift">Сохранить смену ' + two(state.form.day) + "." + two(m.month) +
+      "</button>" + '<button type="button" class="more" data-act="cancel-form">Отмена</button>' +
+      '<div class="note">Откроется чат — бот покажет «Проверь смену», сохраняет по ✅.</div>';
+    return html;
+  }
+  function shiftParam(m, day, v) {
+    function ok(x) { return isFinite(x) && x >= 0 && x <= 999 && Math.floor(x) === x; }
+    if (![v.r, v.as, v.ab, v.mp, v.me].every(ok) || !(v.h >= 0 && v.h <= 24)) return null;
+    var hours = String(Math.round(v.h * 100) / 100).replace(".", "-");
+    return "s_" + m.year + two(m.month) + two(day) + "_" + [v.r, v.as, v.ab, v.mp, v.me].join("_") + "_" + hours;
+  }
+  function payParam(m, amount) {
+    if (!(amount >= 0 && amount <= 10000000)) return null;
+    return "pay_" + m.year + two(m.month) + "_" + String(Math.round(amount * 100) / 100).replace(".", "-");
+  }
+
+  /* ---------- кривая месяца (план 014, G-003 а) ---------- */
+  function cumulative(m, upto) {
+    var by = {}, out = [], s = 0;
+    m.shifts.forEach(function (x) { by[x.d] = x.t; });
+    for (var day = 1; day <= upto; day++) { s += by[day] || 0; out.push(s); }
+    return out;
+  }
+  function curveBlock(d) {
+    if (d.cal.length < 2 || !d.todayDay) return "";
+    var prev = d.cal[0], cur = d.cal[1];
+    if (!prev.shifts.length && !cur.shifts.length) return "";
+    var pDays = new Date(prev.year, prev.month, 0).getDate();
+    var a = cumulative(cur, d.todayDay), b = cumulative(prev, pDays);
+    var top = Math.max(a[a.length - 1] || 0, b[b.length - 1] || 0) || 1, W = 300, H = 140, X0 = 26;
+    function pts(arr) {
+      return arr.map(function (v, i) {
+        return Math.round(X0 + i / 30 * (W - X0 - 4)) + "," + Math.round(H - 16 - v / top * (H - 26));
+      }).join(" ");
+    }
+    var grid = "", step = top > 30000 ? 10000 : top > 10000 ? 5000 : top > 4000 ? 2000 : 1000;
+    for (var k = 0; k <= top; k += step) {
+      var y = Math.round(H - 16 - k / top * (H - 26));
+      grid += '<line x1="' + X0 + '" x2="' + (W - 2) + '" y1="' + y + '" y2="' + y + '" class="gl"/>' +
+        '<text x="0" y="' + (y + 3) + '" class="gt">' + (k / 1000) + "к</text>";
+    }
+    var last = a.length - 1;
+    var svg = '<svg viewBox="0 0 ' + W + " " + H + '" class="curve" role="img" aria-label="Заработок нарастающим итогом">' + grid +
+      (prev.shifts.length ? '<polyline points="' + pts(b) + '" class="lp"/>' : "") +
+      '<polyline points="' + pts(a) + '" class="lc"/>' +
+      '<circle cx="' + Math.round(X0 + last / 30 * (W - X0 - 4)) + '" cy="' + Math.round(H - 16 - a[last] / top * (H - 26)) + '" r="3.5" class="dot"/>' +
+      '<text x="' + X0 + '" y="' + (H - 2) + '" class="gt">1</text><text x="' + (W - 14) + '" y="' + (H - 2) + '" class="gt">31</text></svg>';
+    var h = '<section class="sec"><div class="cap">' + cap(MONTHS[cur.month]) + " против " + MONTHS[prev.month] +
+      " · нарастающим итогом, по сменам</div>" + svg +
+      '<div class="lgd"><span><i></i>' + MONTHS[cur.month] + '</span><span><i class="p"></i>' + MONTHS[prev.month] + "</span></div>";
+    if (prev.shifts.length) {
+      var diff = a[last] - b[Math.min(last, b.length - 1)];
+      h += '<div class="row2"><span>На ' + two(d.todayDay) + "." + two(cur.month) + '</span><b class="' + (diff >= 0 ? "up" : "down") + '">' +
+        signed(diff) + " грн к " + DATIVE[prev.month] + "</b></div>";
+    } else {
+      h += '<div class="note">В ' + PREPOSITIONAL[prev.month] + " смен не было — сравнивать не с чем.</div>";
+    }
+    return h + "</section>";
   }
 
   /* ---------- дашборд (план 011) ---------- */
@@ -186,7 +330,13 @@
   }
 
   function render(d) {
-    var h = calBlock(d);   // план 012: сверху календарь и выбранный день, ниже — дашборд текущего месяца
+    var h = "";
+    if (state.stale) {   // открыли с ярлыка — снимок из облака Telegram (план 014, G-004)
+      var t = new Date(state.stale);
+      h += '<div class="stale">Цифры на ' + two(t.getDate()) + "." + two(t.getMonth() + 1) + ", " + two(t.getHours()) + ":" +
+        two(t.getMinutes()) + " · свежие — «📊 Статистика» в боте</div>";
+    }
+    h += calBlock(d);   // план 012: сверху календарь и выбранный день, ниже — дашборд текущего месяца
     h += '<section class="sec"><div class="cap">Сегодня, ' + esc(ddmm(d.date)) + "</div>";
     if (d.today !== null) {
       h += '<div class="row2"><span>Смена</span><b>' + fmt(d.today) + " грн</b></div>";
@@ -206,6 +356,7 @@
         '<div class="row2"><span>Смен</span><b>' + delta(c.n[0], c.n[1]) + "</b></div>" +
         '<div class="row2"><span>Все выдачи</span><b>' + delta(c.issued[0], c.issued[1]) + "</b></div></section>";
     }
+    h += curveBlock(d);   // план 014: кривая месяца перед «По дням недели»
     h += '<section class="sec"><div class="cap">По дням недели · ' + esc(ddmm(d.bs)) + "–" + esc(ddmm(d.be)) +
       ", в среднем за смену</div>" +
       '<div class="seg" role="group" aria-label="Что показать">' +
@@ -215,6 +366,9 @@
     if (d.bot) {
       h += '<button type="button" class="btn main" data-go="add">➕ Добавить смену</button>' +
         '<button type="button" class="btn second" data-go="export">📤 Экспорт</button>';
+    }
+    if (state.homeOk) {   // план 014, G-004 а: ярлык на экран — последняя кнопка
+      h += '<button type="button" class="btn second" data-act="home">📲 Добавить на экран телефона</button>';
     }
     return h;
   }
@@ -230,19 +384,109 @@
   }
 
   var app = document.getElementById("app");
-  var data = readData(parseHash(window.location.hash));
-  var state = { unit: "money", view: "cur", sel: {} };
+  var hash = window.location.hash;
+  var data = readData(parseHash(hash));
+  var state = { unit: "money", view: "cur", sel: {}, dayOpen: false, monthOpen: false, form: null, payOpen: null,
+    stale: null, homeOk: false };
+  function shown() { return data.cal[state.view === "prev" && data.cal.length > 1 ? 0 : data.cal.length - 1]; }
   function draw() { app.innerHTML = data ? render(data) : emptyView(); }
+  function haptic() { try { if (tg && tg.HapticFeedback) tg.HapticFeedback.selectionChanged(); } catch (e) { /* нет — не важно */ } }
+  function vibe() { try { if (tg && tg.HapticFeedback) tg.HapticFeedback.impactOccurred("light"); } catch (e) { /* нет */ } }
+
+  function openForm(m, day) {
+    var s = m.shifts.filter(function (x) { return x.d === day; })[0];
+    state.form = { key: m.key, day: day,
+      vals: s ? { r: s.r, as: s.as, ab: s.ab, mp: s.mp, me: s.me, h: s.h } : { r: 0, as: 0, ab: 0, mp: 0, me: 0, h: data.dh } };
+  }
+  function updateTotal() {
+    var el = document.getElementById("form-total"), m = shown();
+    if (el && state.form) {
+      var t = formTotal(state.form.vals, m.rates);
+      el.textContent = t !== null ? fmt(t) + " грн" : "—";
+    }
+  }
+
   app.addEventListener("click", function (e) {
     var b = e.target.closest("button");
     if (!b || !data || b.disabled) return;
+    var m = shown(), act = b.dataset.act;
     if (b.dataset.unit) { state.unit = b.dataset.unit; draw(); }
-    else if (b.dataset.nav) { state.view = b.dataset.nav; draw(); }
+    else if (b.dataset.nav) { state.view = b.dataset.nav; state.form = null; state.payOpen = null; draw(); }
     else if (b.dataset.day) {
-      state.sel[state.view === "prev" && data.cal.length > 1 ? "prev" : "cur"] = +b.dataset.day;
+      var day = +b.dataset.day, has = m.shifts.some(function (x) { return x.d === day; });
+      state.sel[m.key] = day;
+      state.form = null;
+      // G-005 б: нажали пустой прошедший день или сегодня — сразу форма
+      if (!has && !isFuture(data, m, day) && data.bot) openForm(m, day);
+      haptic();
       draw();
-    } else if (b.dataset.go) go(data.bot, b.dataset.go);
+    }
+    else if (b.dataset.step) {
+      var f = b.dataset.step, stepv = f === "h" ? 0.5 : 1;
+      state.form.vals[f] = Math.max(0, Math.round((state.form.vals[f] + stepv * +b.dataset.d) * 100) / 100);
+      var inp = app.querySelector('input[data-field="' + f + '"]');
+      if (inp) inp.value = state.form.vals[f];
+      updateTotal();
+      haptic();
+    }
+    else if (act === "dmore") { state.dayOpen = !state.dayOpen; draw(); }
+    else if (act === "mmore") { state.monthOpen = !state.monthOpen; draw(); }
+    else if (act === "edit") { openForm(m, state.sel[m.key] || data.todayDay); draw(); }
+    else if (act === "cancel-form") { state.form = null; draw(); }
+    else if (act === "save-shift") {
+      var p = shiftParam(m, state.form.day, state.form.vals);
+      if (!p) { alertMsg("Проверьте цифры: целые от 0 до 999, часы — от 0 до 24."); return; }
+      vibe();
+      go(data.bot, p);
+    }
+    else if (act === "pay-open") { state.payOpen = m.key; draw(); var pi = document.getElementById("pay-amount"); if (pi) pi.focus(); }
+    else if (act === "pay-save") {
+      var amount = Number((document.getElementById("pay-amount") || {}).value);
+      var pp = payParam(m, amount);
+      if (!pp || !(amount > 0)) { alertMsg("Введите сумму, например 22500."); return; }
+      vibe();
+      go(data.bot, pp);
+    }
+    else if (act === "home") { try { tg.addToHomeScreen(); } catch (err) { /* старый Telegram */ } }
+    else if (b.dataset.go) go(data.bot, b.dataset.go);
   });
+  app.addEventListener("input", function (e) {
+    var f = e.target.dataset && e.target.dataset.field;
+    if (!f || !state.form) return;
+    var v = Number(e.target.value);
+    state.form.vals[f] = isFinite(v) && v >= 0 ? v : 0;
+    updateTotal();
+  });
+  function alertMsg(text) { if (tg && tg.showAlert) tg.showAlert(text); else window.alert(text); }
+
+  /* ---------- снимок в облаке Telegram и ярлык на экран (план 014, G-004 а) ---------- */
+  var cloud = tg && tg.CloudStorage && tg.isVersionAtLeast && tg.isVersionAtLeast("6.9") ? tg.CloudStorage : null;
+  function ownHash(h) {   // только наши параметры — без tgWebApp…, которые дописывает Telegram
+    return "#" + h.replace(/^#/, "").split("&").filter(function (x) { return x && x.indexOf("tgWebApp") !== 0; }).join("&");
+  }
+  if (data && cloud) {
+    try { cloud.setItem("snap", JSON.stringify({ h: ownHash(hash), at: Date.now() })); } catch (e) { /* не сохранилось — не страшно */ }
+  }
+  if (!data && cloud) {
+    cloud.getItem("snap", function (err, val) {
+      if (err || !val) return;
+      try {
+        var snap = JSON.parse(val);
+        data = readData(parseHash(snap.h));
+        if (data) { state.stale = snap.at; draw(); }
+      } catch (e) { /* снимок испорчен — остаётся подсказка */ }
+    });
+  }
+  if (tg && tg.isVersionAtLeast && tg.isVersionAtLeast("8.0") && tg.addToHomeScreen) {
+    state.homeOk = true;
+    try {
+      tg.checkHomeScreenStatus(function (status) {
+        if (status === "added" || status === "unsupported") { state.homeOk = false; draw(); }
+      });
+      tg.onEvent("homeScreenAdded", function () { state.homeOk = false; draw(); });
+    } catch (e) { state.homeOk = false; }
+  }
+
   draw();
-  window.PaydayMiniApp = { parseHash: parseHash, readData: readData, shifts: shifts };  // для проверки в браузере
+  window.PaydayMiniApp = { parseHash: parseHash, readData: readData, shifts: shifts, shiftParam: shiftParam, payParam: payParam };
 })();

@@ -77,6 +77,41 @@ body {
 .legend { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; font-size: 11px; color: var(--hint); margin-top: 8px; }
 .legend .lg { width: 12px; height: 12px; border-radius: 3px; display: inline-block; background: var(--accent); }
 .legend .lg.l1 { opacity: .22; } .legend .lg.l2 { opacity: .42; } .legend .lg.l3 { opacity: .7; }
+/* --- план 014: подробности, ввод, кривая, снимок --- */
+button.more { font: inherit; font-size: 13px; color: var(--link); background: none; border: 0; padding: 6px 0 0; cursor: pointer; }
+button.more:disabled { opacity: .4; }
+button.field { font: inherit; width: 100%; display: flex; justify-content: space-between; align-items: center; gap: 8px;
+  margin-top: 8px; padding: 9px 10px; border: 0; border-radius: 9px; background: var(--bg); color: var(--text); cursor: pointer; }
+button.field b { color: var(--link); font-weight: 600; }
+.payform { display: flex; gap: 8px; margin-top: 8px; }
+.payform input { flex: 1; min-width: 0; font: inherit; padding: 9px 10px; border-radius: 9px; border: 1px solid var(--hint);
+  background: var(--section); color: var(--text); }
+.payform .btn { width: auto; padding: 9px 14px; }
+.mcard { margin-top: 6px; padding-top: 6px; border-top: 1px solid rgba(127, 127, 127, .2); }
+.tbl { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; font-size: 13px; margin-top: 4px; }
+.tbl td { padding: 3px 0; border-bottom: 1px solid rgba(127, 127, 127, .15); }
+.tbl td:last-child { text-align: right; font-weight: 600; }
+.tbl td.m { color: var(--hint); padding: 3px 8px; }
+.tbl tr:last-child td { border-bottom: 0; }
+.step { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 5px 0;
+  border-bottom: 1px solid rgba(127, 127, 127, .15); }
+.step small { display: block; color: var(--hint); font-size: 11px; }
+.ctl { display: flex; align-items: center; gap: 6px; }
+.ctl button { width: 32px; height: 32px; border-radius: 50%; border: 0; background: var(--bg); color: var(--link);
+  font-size: 18px; line-height: 1; cursor: pointer; }
+.ctl input { width: 54px; text-align: center; font: inherit; font-size: 16px; font-variant-numeric: tabular-nums;
+  padding: 5px 2px; border-radius: 8px; border: 1px solid rgba(127, 127, 127, .35); background: var(--section); color: var(--text); }
+.sec .btn.main { margin-top: 10px; }
+.stale { text-align: center; font-size: 12px; color: var(--hint); padding: 6px 4px; }
+.curve { width: 100%; height: auto; display: block; }
+.curve .gl { stroke: var(--hint); stroke-opacity: .25; }
+.curve .gt { fill: var(--hint); font-size: 9px; }
+.curve .lc { fill: none; stroke: var(--accent); stroke-width: 2.5; }
+.curve .lp { fill: none; stroke: var(--hint); stroke-width: 2; stroke-dasharray: 4 3; }
+.curve .dot { fill: var(--accent); }
+.lgd { display: flex; gap: 12px; font-size: 11px; color: var(--hint); margin-top: 4px; }
+.lgd i { display: inline-block; width: 14px; height: 3px; vertical-align: middle; margin-right: 4px; background: var(--accent); }
+.lgd i.p { background: var(--hint); }
 .empty { text-align: center; padding: 34px 16px; }
 .empty .ico { font-size: 34px; }
 .empty .sub { margin-top: 6px; }
