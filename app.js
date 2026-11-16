@@ -1,7 +1,10 @@
-/* Payday Mini App (планы 011 и 012). Цифры приходят от бота в ссылке после «#» — на сервер они не уходят.
+/* Payday Mini App (планы 011, 012, 014, 015). Цифры приходят от бота в ссылке после «#» — на сервер они не уходят.
    Формат (v=1): ym, g, n, p?, dt, td?, ta, k?, cpm, cd, cm, cn, ci, bs, be, bt, w, i, c,
    s / ps — смены текущего / прошлого месяца «день:сумма:обычн:алко<100:алко>100:МП:МЕ:часы» (числа 36-ричные, кроме часов),
-   pym, pg, pn, pp? — прошлый месяц, bot. Telegram может дописать свои tgWebApp… — их пропускаем. */
+   pym, pg, pn, pp? — прошлый месяц, bot. Telegram может дописать свои tgWebApp… — их пропускаем.
+   План 014: r / pr — тарифы (час, обычн, алко<100, алко>100, МП, МЕ), dh, kc/km/hp/mh? и pkc/pkm/php/pmh?.
+   План 015: hh / phh — обычные часы месяца: у таких смен «:часы» нет; пустая сумма («12::…») — считаем по r;
+   pr / pq нет — те же, что r / q; q / pq — тарифы приёма и курьера, kk / pkk — посылки по графам. */
 (function () {
   "use strict";
   var tg = window.Telegram && window.Telegram.WebApp;
@@ -34,15 +37,26 @@
     var a = String(v || "").split(",").map(num);
     return a.length === n && a.every(function (x) { return x !== null; }) ? a : null;
   }
-  function shifts(v) {
+  // usual — обычные часы месяца (hh), r — тарифы месяца: по ним сумма, если бот её не прислал (план 015)
+  function shifts(v, usual, r) {
     if (!v) return [];
     return String(v).split(",").map(function (e) {
       var a = e.split(":");
-      if (a.length !== 8) return null;
-      var n = a.slice(0, 7).map(function (x) { return parseInt(x, 36); }), h = Number(a[7]);
-      if (n.some(isNaN) || !isFinite(h)) return null;
-      return { d: n[0], t: n[1], r: n[2], as: n[3], ab: n[4], mp: n[5], me: n[6], h: h };
+      if (a.length !== 7 && a.length !== 8) return null;
+      var h = a.length === 8 ? Number(a[7]) : usual;
+      if (h === null || h === undefined || !isFinite(h)) return null;
+      var n = a.slice(0, 7).map(function (x, k) { return k === 1 && x === "" ? null : parseInt(x, 36); });
+      if (n.some(function (x) { return x !== null && isNaN(x); }) || n[0] === null) return null;
+      var s = { d: n[0], t: n[1], r: n[2], as: n[3], ab: n[4], mp: n[5], me: n[6], h: h };
+      if (s.t === null) {
+        if (!r) return null;
+        s.t = shiftTotal(s, r);
+      }
+      return s;
     }).filter(Boolean);
+  }
+  function shiftTotal(s, r) {   // как bot.page_total
+    return s.h * r[0] + s.r * r[1] + s.as * r[2] + s.ab * r[3] + s.mp * r[4] + s.me * r[5];
   }
   function fmt(x) { return Math.round(x).toLocaleString("ru-RU"); }
   function cap(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
@@ -86,11 +100,12 @@
       return { kc: num(p[pre + "kc"]), km: num(p[pre + "km"]), hp: num(p[pre + "hp"]), mh: num(p[pre + "mh"]) };
     }
     d.dh = num(p.dh) !== null ? num(p.dh) : 12;
-    d.cal = [{ key: "cur", year: d.year, month: d.month, gross: d.gross, net: d.net, paid: num(p.p), shifts: shifts(p.s),
-      rates: list(p.r, 6), card: card("") }];
+    var r = list(p.r, 6), pr = list(p.pr, 6) || r, q = list(p.q, 6), pq = list(p.pq, 6) || q;
+    d.cal = [{ key: "cur", year: d.year, month: d.month, gross: d.gross, net: d.net, paid: num(p.p),
+      shifts: shifts(p.s, num(p.hh), r), rates: r, card: card(""), q: q, kk: list(p.kk, 6) }];
     if (pym && num(p.pg) !== null && num(p.pn) !== null) {
       d.cal.unshift({ key: "prev", year: +pym[1], month: +pym[2], gross: num(p.pg), net: num(p.pn), paid: num(p.pp),
-        shifts: shifts(p.ps), rates: list(p.pr, 6), card: card("p") });
+        shifts: shifts(p.ps, num(p.phh), pr), rates: pr, card: card("p"), q: pq, kk: list(p.pkk, 6) });
     }
     return d;
   }
@@ -116,10 +131,7 @@
       if (sel) state.sel[m.key] = sel;   // чтобы «✏️ Изменить» знал, какой день выбран
     }
 
-    var h = '<section class="sec"><div class="calhead">' +
-      '<button type="button" data-nav="prev" aria-label="Прошлый месяц"' + (isCur && d.cal.length > 1 ? "" : " disabled") + ">‹</button>" +
-      "<b>" + cap(MONTHS[m.month]) + " " + m.year + "</b>" +
-      '<button type="button" data-nav="cur" aria-label="Текущий месяц"' + (isCur ? " disabled" : "") + ">›</button></div>" +
+    var h = '<section class="sec">' + navHead(d, m) +
       '<div class="sub center"><b>' + fmt(m.gross) + " грн</b> грязными · <b>" + fmt(m.net) + "</b> чистыми · " +
       m.shifts.length + " " + plural(m.shifts.length, "смена", "смены", "смен") + "</div>";
     if (m.paid !== null) {
@@ -219,10 +231,7 @@
     var a = m.year * 10000 + m.month * 100 + day, b = +dt[1] * 10000 + +dt[2] * 100 + +dt[3];
     return a > b;
   }
-  function formTotal(v, r) {
-    if (!r) return null;
-    return v.r * r[1] + v.as * r[2] + v.ab * r[3] + v.mp * r[4] + v.me * r[5] + v.h * r[0];
-  }
+  function formTotal(v, r) { return r ? shiftTotal(v, r) : null; }
   function formBlock(d, m) {
     var v = state.form.vals, total = formTotal(v, m.rates);
     var html = FIELDS.map(function (f) {
@@ -248,6 +257,169 @@
   function payParam(m, amount) {
     if (!(amount >= 0 && amount <= 10000000)) return null;
     return "pay_" + m.year + two(m.month) + "_" + String(Math.round(amount * 100) / 100).replace(".", "-");
+  }
+
+  function navHead(d, m) {   // «‹ Ноябрь 2026 ›» — текущий и прошлый месяц (D-42)
+    var isCur = m.key === "cur";
+    return '<div class="calhead">' +
+      '<button type="button" data-nav="prev" aria-label="Прошлый месяц"' + (isCur && d.cal.length > 1 ? "" : " disabled") + ">‹</button>" +
+      "<b>" + cap(MONTHS[m.month]) + " " + m.year + "</b>" +
+      '<button type="button" data-nav="cur" aria-label="Текущий месяц"' + (isCur ? " disabled" : "") + ">›</button></div>";
+  }
+
+  /* ---------- вкладки управления (план 015, G-006 а) ---------- */
+  var TABS = [["stat", "📊", "Статистика"], ["rates", "💰", "Тарифы"], ["packs", "📦", "Посылки"], ["hours", "⏱", "Часы"]];
+  var SHIFT_RATES = [["hourly", "Ставка за час"], ["regular", "Обычная выдача"], ["alco_small", "Алко-чек <100"],
+    ["alco_big", "Алко-чек >100"], ["mp", "МП"], ["me", "МЕ"]];          // порядок r
+  var PACK_RATES = [["pk_in_meest", "Приём Meest", "от клиента"], ["pk_in_merchant", "Приём Мерчант", "от клиента"],
+    ["pk_cin_meest", "От курьера Meest"], ["pk_cin_merchant", "От курьера Мерчант"],
+    ["pk_cout_meest", "Курьеру Meest"], ["pk_cout_merchant", "Курьеру Мерчант"]];   // порядок q и kk (calc.PACK_KEYS)
+  var RATE_KEYS = SHIFT_RATES.concat(PACK_RATES).map(function (x) { return x[0]; });
+
+  function tabsBar() {
+    return '<nav class="tabs" role="tablist" aria-label="Разделы">' + TABS.map(function (t) {
+      return '<button type="button" role="tab" data-tab="' + t[0] + '" aria-selected="' + (state.tab === t[0]) + '">' +
+        '<span aria-hidden="true">' + t[1] + "</span>" + t[2] + "</button>";
+    }).join("") + "</nav>";
+  }
+  function noBot(d) { return d.bot ? "" : '<div class="note">Сохранять можно, когда страница открыта из бота.</div>'; }
+  function isoAdd(iso, days) {
+    var p = iso.split("-"), t = new Date(+p[0], +p[1] - 1, +p[2] + days);
+    return t.getFullYear() + "-" + two(t.getMonth() + 1) + "-" + two(t.getDate());
+  }
+
+  // «💰 Тарифы»: нажали тариф — новая цена и с какого дня (сегодня · с 1-го · другая дата)
+  function rateSince(d) {
+    var e = state.rate;
+    return e.since === "first" ? d.date.slice(0, 8) + "01" : e.since === "other" ? e.other : d.date;
+  }
+  function rateLabel(e) {
+    var row = SHIFT_RATES.concat(PACK_RATES).filter(function (x) { return x[0] === e.key; })[0];
+    return row ? row[1] : e.key;
+  }
+  function rateSaveText(d) {
+    var e = state.rate, since = rateSince(d);
+    return "Сохранить: " + rateLabel(e) + " " + (isFinite(e.price) ? nice(e.price) : "—") + " грн" + (since ? " с " + ddmm(since) : "");
+  }
+  function rateRows(d, rows, vals) {
+    return rows.map(function (x, k) {
+      var cur = vals ? vals[k] : null, open = state.rate && state.rate.key === x[0];
+      var h = '<button type="button" class="li" data-rate="' + x[0] + '" aria-expanded="' + !!open + '"><span>' + esc(x[1]) +
+        (x[2] ? "<small>" + esc(x[2]) + "</small>" : "") + '</span><span class="v">' +
+        (cur !== null ? nice(cur) + (x[0] === "hourly" ? " грн/ч" : " грн") : "—") + "</span></button>";
+      if (open) h += rateEdit(d, cur);
+      return h;
+    }).join("");
+  }
+  function rateEdit(d, cur) {
+    var e = state.rate, first = d.date.slice(0, 8) + "01";
+    var py = d.year, pm = d.month - 1;
+    if (pm < 1) { pm = 12; py -= 1; }
+    var chips = [["today", "Сегодня · " + ddmm(d.date)], ["first", "С 1-го · " + ddmm(first)], ["other", "Другая…"]];
+    return '<div class="edit"><div class="cap">Сейчас ' + (cur !== null ? nice(cur) + " грн" : "—") + "</div>" +
+      '<label>Новая цена <input id="rate-price" type="number" inputmode="decimal" min="0" max="100000" step="0.01" value="' +
+      (isFinite(e.price) ? e.price : "") + '"></label>' +
+      '<div class="cap" style="margin-top:10px">С какого дня</div><div class="chips" role="group" aria-label="С какого дня">' +
+      chips.map(function (c) {
+        return '<button type="button" data-since="' + c[0] + '" aria-pressed="' + (e.since === c[0]) + '">' + c[1] + "</button>";
+      }).join("") + "</div>" +
+      (e.since === "other" ? '<input id="rate-date" class="date" type="date" min="' + py + "-" + two(pm) + '-01" max="' +
+        isoAdd(d.date, 366) + '" value="' + esc(e.other || "") + '" aria-label="Дата">' : "") +
+      '<button type="button" class="btn main" id="rate-save" data-act="rate-save"' + (d.bot ? "" : " disabled") + ">" +
+      esc(rateSaveText(d)) + "</button>" +
+      '<button type="button" class="more" data-act="rate-cancel">Отмена</button>' +
+      '<div class="note">Откроется чат — бот покажет «💰 Записать…?», сохраняет по ✅. Смены с этого дня пересчитаются.</div></div>';
+  }
+  function ratesBlock(d) {
+    var cur = d.cal[d.cal.length - 1];
+    if (!cur.rates) return '<section class="sec"><div class="note">Тарифов в ссылке нет — откройте страницу заново из бота.</div></section>';
+    return '<section class="sec"><div class="cap">Смена · на ' + esc(ddmm(d.date)) + "</div>" + rateRows(d, SHIFT_RATES, cur.rates) +
+      "</section>" + '<section class="sec"><div class="cap">📦 Приём и курьер · на ' + esc(ddmm(d.date)) + "</div>" +
+      rateRows(d, PACK_RATES, cur.q) + "</section>" + noBot(d);
+  }
+  function rateParam(key, price, iso) {
+    if (RATE_KEYS.indexOf(key) < 0 || !(price >= 0 && price <= 100000)) return null;
+    var dm = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || "");
+    if (!dm) return null;
+    return "rate_" + key + "_" + String(Math.round(price * 100) / 100).replace(".", "-") + "_" + dm[1] + dm[2] + dm[3];
+  }
+
+  // «📦 Посылки»: −/+ или число по каждой графе за показанный месяц; в бот уходит разница (план 015)
+  function packVals(m) {
+    if (!state.packs[m.key]) state.packs[m.key] = m.kk.slice();
+    return state.packs[m.key];
+  }
+  function packSummary(m) {
+    var v = packVals(m), lines = [], count = 0, money = 0;
+    PACK_RATES.forEach(function (x, k) {
+      var dlt = v[k] - m.kk[k];
+      count += v[k];
+      money += v[k] * (m.q ? m.q[k] : 0);
+      if (dlt) lines.push('<div class="row2"><span>' + esc(x[1]) + " (" + m.kk[k] + " → " + v[k] + ')</span><b class="' +
+        (dlt > 0 ? "up" : "down") + '">' + signed(dlt) + "</b></div>");
+    });
+    return (lines.length ? '<div class="cap" style="margin-top:8px">Изменено</div>' + lines.join("") : "") +
+      '<div class="row2"><span>Итого за ' + MONTHS[m.month] + "</span><b>" + fmt(count) + " " +
+      plural(count, "посылка", "посылки", "посылок") + " · " + fmt(money) + " грн</b></div>";
+  }
+  function packDeltas(m) { var v = packVals(m); return v.map(function (x, k) { return x - m.kk[k]; }); }
+  function packsBlock(d) {
+    var m = shown();
+    var h = '<section class="sec">' + navHead(d, m) + "</section>";
+    if (!m.kk) return h + '<section class="sec"><div class="note">Посылок в ссылке нет — откройте страницу заново из бота.</div></section>';
+    var v = packVals(m), changed = packDeltas(m).some(Boolean);
+    h += '<section class="sec">' + PACK_RATES.map(function (x, k) {
+      var rate = m.q ? nice(m.q[k]) + " грн" : "";
+      return '<div class="step"><span>' + esc(x[1]) + "<small>" + (x[2] ? esc(x[2]) + " · " : "") + rate + "</small></span>" +
+        '<span class="ctl"><button type="button" data-pstep="' + k + '" data-d="-1" aria-label="Меньше">−</button>' +
+        '<input class="wide" type="number" inputmode="numeric" min="0" max="99999" step="1" data-pk="' + k + '" value="' + v[k] +
+        '" aria-label="' + esc(x[1]) + '">' +
+        '<button type="button" data-pstep="' + k + '" data-d="1" aria-label="Больше">+</button></span></div>';
+    }).join("") + '<div id="pk-sum">' + packSummary(m) + "</div>" +
+      '<button type="button" class="btn main" id="pk-save" data-act="packs-save"' + (changed && d.bot ? "" : " disabled") +
+      ">Сохранить изменения</button>" +
+      '<button type="button" class="more" data-act="packs-reset"' + (changed ? "" : " disabled") + ">Вернуть как было</button>" +
+      '<div class="note">Откроется чат — бот покажет, что изменится, записывает по ✅.</div></section>';
+    return h + noBot(d);
+  }
+  function packsParam(m, deltas) {
+    if (deltas.length !== 6 || !deltas.some(Boolean) ||
+        !deltas.every(function (x) { return Math.floor(x) === x && Math.abs(x) <= 99999; })) return null;
+    return "pk_" + m.year + two(m.month) + "_" + deltas.join("_");
+  }
+
+  // «⏱ Часы»: часы за месяц итогом; «Считать по сменам» — вернуть часы из смен
+  function shiftHours(m) { return m.shifts.reduce(function (a, s) { return a + s.h; }, 0); }
+  function hoursVal(m) {
+    if (state.hours[m.key] === undefined) {
+      var mh = m.card && m.card.mh;
+      state.hours[m.key] = mh !== null && mh !== undefined ? mh : Math.round(shiftHours(m) * 100) / 100;
+    }
+    return state.hours[m.key];
+  }
+  function hoursMoney(m) {
+    var v = hoursVal(m), rate = m.rates ? m.rates[0] : null;
+    return rate === null ? "—" : nice(v) + " × " + nice(rate) + " = " + fmt(v * rate) + " грн";
+  }
+  function hoursSaveText(m) { return "Сохранить: " + nice(hoursVal(m)) + " ч за " + MONTHS[m.month]; }
+  function hoursBlock(d) {
+    var m = shown(), mh = m.card && m.card.mh, entered = mh !== null && mh !== undefined, sh = shiftHours(m);
+    return '<section class="sec">' + navHead(d, m) + "</section>" +
+      '<section class="sec"><div class="cap">⏱ Часы за ' + MONTHS[m.month] + " · сейчас " +
+      (entered ? nice(mh) + " — введено вами" : nice(sh) + " — по сменам") + "</div>" +
+      '<div class="edit"><label>Всего часов <input id="hours-input" type="number" inputmode="decimal" min="0" max="744" step="0.5" value="' +
+      hoursVal(m) + '"></label></div>' +
+      '<div class="row2"><span>За часы станет</span><b id="hours-money">' + hoursMoney(m) + "</b></div>" +
+      '<button type="button" class="btn main" id="hours-save" data-act="hours-save"' + (d.bot ? "" : " disabled") + ">" +
+      esc(hoursSaveText(m)) + "</button>" +
+      (entered ? '<button type="button" class="more" data-act="hours-clear"' + (d.bot ? "" : " disabled") +
+        ">Считать по сменам (" + nice(sh) + " ч)</button>" : "") +
+      '<div class="note">Откроется чат — бот покажет «⏱ Записать…?», сохраняет по ✅.</div></section>' + noBot(d);
+  }
+  function hoursParam(m, h) {
+    if (h === null) return "mh_" + m.year + two(m.month) + "_c";
+    if (!(h >= 0 && h <= 744)) return null;
+    return "mh_" + m.year + two(m.month) + "_" + String(Math.round(h * 100) / 100).replace(".", "-");
   }
 
   /* ---------- кривая месяца (план 014, G-003 а) ---------- */
@@ -331,11 +503,15 @@
 
   function render(d) {
     var h = "";
-    if (state.stale) {   // открыли с ярлыка — снимок из облака Telegram (план 014, G-004)
+    if (state.stale) {   // открыли с ярлыка или из профиля бота — снимок из облака Telegram (планы 014, 015)
       var t = new Date(state.stale);
       h += '<div class="stale">Цифры на ' + two(t.getDate()) + "." + two(t.getMonth() + 1) + ", " + two(t.getHours()) + ":" +
-        two(t.getMinutes()) + " · свежие — «📊 Статистика» в боте</div>";
+        two(t.getMinutes()) + " · свежие — кнопка «📊 Payday» у поля ввода</div>";
     }
+    h += tabsBar();   // план 015, G-006 а
+    if (state.tab === "rates") return h + ratesBlock(d);
+    if (state.tab === "packs") return h + packsBlock(d);
+    if (state.tab === "hours") return h + hoursBlock(d);
     h += calBlock(d);   // план 012: сверху календарь и выбранный день, ниже — дашборд текущего месяца
     h += '<section class="sec"><div class="cap">Сегодня, ' + esc(ddmm(d.date)) + "</div>";
     if (d.today !== null) {
@@ -375,7 +551,7 @@
 
   function emptyView() {
     return '<section class="sec empty"><div class="ico" aria-hidden="true">📱</div><b>Откройте страницу из бота</b>' +
-      '<div class="sub">Нажмите «📊 Статистика», затем «📱 Тест» — цифры приходят вместе с кнопкой.</div></section>';
+      '<div class="sub">Нажмите кнопку «📊 Payday» у поля ввода в чате с ботом — цифры приходят вместе с ней.</div></section>';
   }
 
   function go(bot, what) {
@@ -387,7 +563,7 @@
   var hash = window.location.hash;
   var data = readData(parseHash(hash));
   var state = { unit: "money", view: "cur", sel: {}, dayOpen: false, monthOpen: false, form: null, payOpen: null,
-    stale: null, homeOk: false };
+    stale: null, homeOk: false, tab: "stat", rate: null, packs: {}, hours: {} };
   function shown() { return data.cal[state.view === "prev" && data.cal.length > 1 ? 0 : data.cal.length - 1]; }
   function draw() { app.innerHTML = data ? render(data) : emptyView(); }
   function haptic() { try { if (tg && tg.HapticFeedback) tg.HapticFeedback.selectionChanged(); } catch (e) { /* нет — не важно */ } }
@@ -410,7 +586,46 @@
     var b = e.target.closest("button");
     if (!b || !data || b.disabled) return;
     var m = shown(), act = b.dataset.act;
-    if (b.dataset.unit) { state.unit = b.dataset.unit; draw(); }
+    if (b.dataset.tab) { state.tab = b.dataset.tab; state.rate = null; haptic(); draw(); window.scrollTo(0, 0); }
+    else if (b.dataset.rate) {   // план 015: «💰 Тарифы» — открыть / закрыть правку тарифа
+      var key = b.dataset.rate, cur = data.cal[data.cal.length - 1], k = RATE_KEYS.indexOf(key);
+      var vals = k < 6 ? cur.rates : cur.q, now = vals ? vals[k % 6] : NaN;
+      state.rate = state.rate && state.rate.key === key ? null : { key: key, price: now, since: "today", other: data.date };
+      haptic();
+      draw();
+      var pin = document.getElementById("rate-price");
+      if (pin) { pin.focus(); pin.select(); }
+    }
+    else if (b.dataset.since) { state.rate.since = b.dataset.since; draw(); }
+    else if (act === "rate-cancel") { state.rate = null; draw(); }
+    else if (act === "rate-save") {
+      var rp = rateParam(state.rate.key, state.rate.price, rateSince(data));
+      if (!rp) { alertMsg("Проверьте цену (0–100 000) и дату."); return; }
+      vibe();
+      go(data.bot, rp);
+    }
+    else if (b.dataset.pstep) {   // «📦 Посылки»: −/+
+      var pv = packVals(m), pk = +b.dataset.pstep;
+      pv[pk] = Math.max(0, Math.min(99999, pv[pk] + +b.dataset.d));
+      var pinp = app.querySelector('input[data-pk="' + pk + '"]');
+      if (pinp) pinp.value = pv[pk];
+      updatePacks(m);
+      haptic();
+    }
+    else if (act === "packs-reset") { state.packs[m.key] = null; draw(); }
+    else if (act === "packs-save") {
+      var kp = packsParam(m, packDeltas(m));
+      if (!kp) { alertMsg("Проверьте числа: целые от 0 до 99 999."); return; }
+      vibe();
+      go(data.bot, kp);
+    }
+    else if (act === "hours-save" || act === "hours-clear") {
+      var hp = hoursParam(m, act === "hours-clear" ? null : hoursVal(m));
+      if (!hp) { alertMsg("Часы — от 0 до 744."); return; }
+      vibe();
+      go(data.bot, hp);
+    }
+    else if (b.dataset.unit) { state.unit = b.dataset.unit; draw(); }
     else if (b.dataset.nav) { state.view = b.dataset.nav; state.form = null; state.payOpen = null; draw(); }
     else if (b.dataset.day) {
       var day = +b.dataset.day, has = m.shifts.some(function (x) { return x.d === day; });
@@ -451,12 +666,39 @@
     else if (b.dataset.go) go(data.bot, b.dataset.go);
   });
   app.addEventListener("input", function (e) {
-    var f = e.target.dataset && e.target.dataset.field;
+    var el = e.target, v = Number(el.value), m = data && shown();
+    if (el.id === "rate-price" && state.rate) {   // план 015: без перерисовки — чтобы не терять фокус
+      state.rate.price = el.value === "" ? NaN : v;
+      setText("rate-save", rateSaveText(data));
+      return;
+    }
+    if (el.id === "rate-date" && state.rate) { state.rate.other = el.value; setText("rate-save", rateSaveText(data)); return; }
+    if (el.dataset && el.dataset.pk !== undefined && m) {
+      packVals(m)[+el.dataset.pk] = isFinite(v) && v >= 0 ? Math.min(99999, Math.floor(v)) : 0;
+      updatePacks(m);
+      return;
+    }
+    if (el.id === "hours-input" && m) {
+      state.hours[m.key] = isFinite(v) && v >= 0 ? v : 0;
+      var hm = document.getElementById("hours-money");
+      if (hm) hm.textContent = hoursMoney(m);
+      setText("hours-save", hoursSaveText(m));
+      return;
+    }
+    var f = el.dataset && el.dataset.field;
     if (!f || !state.form) return;
-    var v = Number(e.target.value);
     state.form.vals[f] = isFinite(v) && v >= 0 ? v : 0;
     updateTotal();
   });
+  function setText(id, text) { var x = document.getElementById(id); if (x) x.textContent = text; }
+  function updatePacks(m) {
+    var sum = document.getElementById("pk-sum"), changed = packDeltas(m).some(Boolean);
+    if (sum) sum.innerHTML = packSummary(m);
+    var sv = document.getElementById("pk-save");
+    if (sv) sv.disabled = !changed || !data.bot;
+    var rs = app.querySelector('[data-act="packs-reset"]');
+    if (rs) rs.disabled = !changed;
+  }
   function alertMsg(text) { if (tg && tg.showAlert) tg.showAlert(text); else window.alert(text); }
 
   /* ---------- снимок в облаке Telegram и ярлык на экран (план 014, G-004 а) ---------- */
@@ -488,5 +730,6 @@
   }
 
   draw();
-  window.PaydayMiniApp = { parseHash: parseHash, readData: readData, shifts: shifts, shiftParam: shiftParam, payParam: payParam };
+  window.PaydayMiniApp = { parseHash: parseHash, readData: readData, shifts: shifts, shiftParam: shiftParam, payParam: payParam,
+    rateParam: rateParam, packsParam: packsParam, hoursParam: hoursParam };
 })();

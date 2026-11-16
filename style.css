@@ -112,6 +112,32 @@ button.field b { color: var(--link); font-weight: 600; }
 .lgd { display: flex; gap: 12px; font-size: 11px; color: var(--hint); margin-top: 4px; }
 .lgd i { display: inline-block; width: 14px; height: 3px; vertical-align: middle; margin-right: 4px; background: var(--accent); }
 .lgd i.p { background: var(--hint); }
+/* --- план 015: вкладки управления (G-006 а) --- */
+.tabs { position: sticky; top: 0; z-index: 2; display: grid; grid-template-columns: repeat(4, 1fr); gap: 2px; padding: 4px;
+  background: var(--section); border-radius: 12px; box-shadow: 0 0 0 6px var(--bg); }
+.tabs button { font: inherit; font-size: 11px; display: flex; flex-direction: column; align-items: center; gap: 1px; min-height: 44px;
+  padding: 5px 2px; border: 0; border-radius: 9px; background: transparent; color: var(--hint); cursor: pointer; }
+.tabs button span { font-size: 18px; line-height: 1.15; }
+.tabs button[aria-selected="true"] { background: var(--bg); color: var(--text); font-weight: 600; }
+button.li { font: inherit; width: 100%; display: flex; justify-content: space-between; align-items: center; gap: 8px;
+  min-height: 44px; padding: 8px 0; border: 0; border-bottom: 1px solid rgba(127, 127, 127, .15); background: none;
+  color: var(--text); text-align: left; cursor: pointer; }
+button.li small { display: block; color: var(--hint); font-size: 11px; }
+button.li .v { color: var(--hint); white-space: nowrap; font-variant-numeric: tabular-nums; }
+button.li .v::after { content: " ›"; color: var(--link); }
+button.li[aria-expanded="true"] .v::after { content: " ⌄"; }
+.edit { background: var(--bg); border-radius: 10px; padding: 10px; margin: 6px 0 4px; }
+.edit label { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 14px; }
+.edit input, input.date { font: inherit; font-size: 16px; font-variant-numeric: tabular-nums; padding: 7px 9px; border-radius: 8px;
+  border: 1px solid rgba(127, 127, 127, .35); background: var(--section); color: var(--text); }
+.edit label input { width: 120px; text-align: right; }
+input.date { display: block; width: 100%; margin-top: 8px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chips button { font: inherit; font-size: 13px; padding: 7px 11px; border-radius: 16px; border: 0; background: var(--section);
+  color: var(--link); cursor: pointer; }
+.chips button[aria-pressed="true"] { background: var(--accent); color: var(--accent-text); }
+.ctl input.wide { width: 68px; }
+.btn:disabled { opacity: .45; cursor: default; }
 .empty { text-align: center; padding: 34px 16px; }
 .empty .ico { font-size: 34px; }
 .empty .sub { margin-top: 6px; }
