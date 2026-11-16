@@ -4,7 +4,8 @@
    pym, pg, pn, pp? — прошлый месяц, bot. Telegram может дописать свои tgWebApp… — их пропускаем.
    План 014: r / pr — тарифы (час, обычн, алко<100, алко>100, МП, МЕ), dh, kc/km/hp/mh? и pkc/pkm/php/pmh?.
    План 015: hh / phh — обычные часы месяца: у таких смен «:часы» нет; пустая сумма («12::…») — считаем по r;
-   pr / pq нет — те же, что r / q; q / pq — тарифы приёма и курьера, kk / pkk — посылки по графам. */
+   pr / pq нет — те же, что r / q; q / pq — тарифы приёма и курьера, kk / pkk — посылки по графам.
+   План 016: pf — итоги за всё время для «👤 Профиля» (28 значений, см. bot.profile_field), nm — имя в таблице. */
 (function () {
   "use strict";
   var tg = window.Telegram && window.Telegram.WebApp;
@@ -107,6 +108,8 @@
       d.cal.unshift({ key: "prev", year: +pym[1], month: +pym[2], gross: num(p.pg), net: num(p.pn), paid: num(p.pp),
         shifts: shifts(p.ps, num(p.phh), pr), rates: pr, card: card("p"), q: pq, kk: list(p.pkk, 6) });
     }
+    d.pf = readProfile(p.pf);   // план 016
+    d.nm = p.nm ? String(p.nm).slice(0, 40) : "";
     return d;
   }
 
@@ -267,8 +270,101 @@
       '<button type="button" data-nav="cur" aria-label="Текущий месяц"' + (isCur ? " disabled" : "") + ">›</button></div>";
   }
 
+  /* ---------- «👤 Профиль» (план 016, G-008 а) ---------- */
+  function readProfile(v) {
+    var a = String(v || "").split(",");
+    if (a.length !== 28) return null;
+    function b(x) { return x === "" ? null : parseInt(x, 36); }
+    function day(x) { return /^\d{8}$/.test(x) ? x.slice(6, 8) + "." + x.slice(4, 6) + "." + x.slice(0, 4) : null; }
+    var p = { first: day(a[0]), n: b(a[1]), hours: num(a[2]), gross: b(a[3]), net: b(a[4]), avgShift: b(a[5]), avgMonth: b(a[6]),
+      reg: b(a[7]), as: b(a[8]), ab: b(a[9]), mp: b(a[10]), me: b(a[11]),
+      packs: a.slice(12, 18).map(b), bestDay: day(a[18]), best: b(a[19]), mostDay: day(a[20]), most: b(a[21]),
+      bestMonth: /^\d{6}$/.test(a[22]) ? { y: +a[22].slice(0, 4), m: +a[22].slice(4, 6) } : null, bestMonthSum: b(a[23]),
+      paidN: b(a[24]), paidOk: b(a[25]), paidDiff: num(a[26]), gemini: a[27] === "1" };
+    var must = [p.n, p.hours, p.gross, p.net, p.avgShift, p.reg, p.as, p.ab, p.mp, p.me, p.paidN, p.paidOk, p.paidDiff];
+    if (must.some(function (x) { return x === null || isNaN(x); }) || p.packs.some(function (x) { return x === null || isNaN(x); })) return null;
+    return p;
+  }
+  // пороги достижений (план 016): самое большое полученное — цветом, следующее — «ещё N»
+  var GOALS = [["🎯", [100, 200, 300, 500, 1000], "смен", ["смена", "смены", "смен"]],
+    ["🔥", [1000, 5000, 10000, 25000, 50000, 100000], "выдач", ["выдача", "выдачи", "выдач"]],
+    ["📦", [1000, 5000, 10000, 25000], "посылок", ["посылка", "посылки", "посылок"]]];
+  function badges(vals) {
+    var out = [];
+    GOALS.forEach(function (g, k) {
+      var v = vals[k], got = null, next = null;
+      g[1].forEach(function (t) { if (v >= t) got = t; else if (next === null) next = t; });
+      if (got !== null) out.push('<span class="got">' + g[0] + " " + fmt(got) + " " + g[2] + "</span>");
+      if (next !== null) out.push("<span>" + g[0] + " " + fmt(next) + " " + g[2] + " · ещё " + fmt(next - v) + "</span>");
+    });
+    return '<div class="badges">' + out.join("") + "</div>";
+  }
+  function tgUser() {
+    try { return (tg && tg.initDataUnsafe && tg.initDataUnsafe.user) || null; } catch (e) { return null; }
+  }
+  function initials(name) {
+    var w = String(name || "").trim().split(/\s+/).filter(Boolean);
+    return w.length ? (w[0].charAt(0) + (w[1] ? w[1].charAt(0) : "")).toUpperCase() : "👤";
+  }
+  function profileBlock(d) {
+    var p = d.pf;
+    if (!p) {
+      return '<section class="sec"><div class="sub">В этом снимке профиля ещё нет. Откройте Mini App кнопкой «📊 Payday» у поля ' +
+        "ввода — профиль появится и сохранится в снимок.</div></section>";
+    }
+    var u = tgUser(), tgName = u ? [u.first_name, u.last_name].filter(Boolean).join(" ") : "";
+    var title = tgName || d.nm || "Вы", sub = [];
+    if (u && u.username) sub.push("@" + u.username);
+    sub.push(d.nm ? "в таблице «" + d.nm + "»" : "имя в таблице не задано — /name");
+    var since = p.n ? "С " + p.first + " · " + fmt(p.n) + " " + plural(p.n, "смена", "смены", "смен") + " · " + nice(p.hours) + " ч"
+      : "Смен пока нет";
+    var photo = u && /^https:\/\//.test(u.photo_url || "") ? '<img src="' + esc(u.photo_url) + '" alt="">' : esc(initials(title));
+    var h = '<section class="sec hero"><div class="av" aria-hidden="true">' + photo + "</div><div><b>" + esc(title) + "</b>" +
+      "<small>" + esc(sub.join(" · ")) + "</small><small>" + esc(since) + "</small></div></section>";
+    var issued = p.reg + p.mp + p.me, packs = p.packs.reduce(function (a, x) { return a + x; }, 0);
+    var settings = '<section class="sec"><div class="cap">⚙️ Настройки</div>' +
+      '<div class="row2"><span>Часы смены по умолчанию</span><b>' + nice(d.dh) + "</b></div>" +
+      '<div class="row2"><span>Ключ Gemini для фото</span><b>' + (p.gemini ? "есть ✓" : "нет") + "</b></div>" +
+      '<div class="note">Поменять — в боте: /name, /hours, /gemini</div></section>';
+    var goals = '<section class="sec"><div class="cap">Достижения</div>' + badges([p.n, issued, packs]) + "</section>";
+    if (!p.n && !packs) {
+      return h + '<section class="sec"><div class="sub">Профиль заполнится после первой смены: заработок, выдачи, посылки, рекорды.</div></section>' +
+        goals + settings;
+    }
+    h += '<section class="sec"><div class="cap">Заработано за всё время</div>' +
+      '<div class="money"><b>' + fmt(p.gross) + '</b> <span class="sub">грн грязными</span></div>' +
+      '<div class="sub"><b>' + fmt(p.net) + " грн</b> чистыми</div>" +
+      '<div class="row2"><span class="sub">Средняя смена</span><b>' + fmt(p.avgShift) + " грн</b></div>" +
+      (p.avgMonth !== null ? '<div class="row2"><span class="sub">Средний месяц</span><b>' + fmt(p.avgMonth) + " грн</b></div>" : "") +
+      "</section>";
+    h += '<section class="sec"><div class="cap">Выдачи · всего ' + fmt(issued) + " (обычн. + МП + МЕ)</div><div class=\"tiles\">" +
+      tile(p.reg, "обычные") + tile(p.mp, "МП") + tile(p.me, "МЕ") +
+      tile(p.as + p.ab, "алко-чеки · " + fmt(p.as) + " &lt;100 · " + fmt(p.ab) + " &gt;100") + "</div></section>";
+    var k = p.packs;
+    h += '<section class="sec"><div class="cap">📦 Посылки · всего ' + fmt(packs) + '</div><div class="tiles t3">' +
+      tile(k[0] + k[1], "приём от клиента") + tile(k[2] + k[3], "приём от курьера") + tile(k[4] + k[5], "выдано курьеру") +
+      '</div><div class="note">Meest ' + fmt(k[0] + k[2] + k[4]) + " · Мерчант " + fmt(k[1] + k[3] + k[5]) + "</div></section>";
+    if (p.n) {
+      h += '<section class="sec"><div class="cap">🏆 Рекорды</div>' +
+        '<div class="row2"><span>Лучшая смена · ' + p.bestDay + "</span><b>" + fmt(p.best) + " грн</b></div>" +
+        '<div class="row2"><span>Больше всего выдач · ' + p.mostDay + "</span><b>" + fmt(p.most) + "</b></div>" +
+        (p.bestMonth ? '<div class="row2"><span>Лучший месяц · ' + MONTHS[p.bestMonth.m] + " " + p.bestMonth.y + "</span><b>" +
+          fmt(p.bestMonthSum) + " грн</b></div>" : "") + "</section>";
+    }
+    if (p.paidN) {
+      var dd = p.paidDiff;
+      h += '<section class="sec"><div class="cap">💳 Сверка с картой</div>' +
+        '<div class="row2"><span>Сошлось</span><b>' + p.paidOk + " из " + p.paidN + " " + plural(p.paidN, "месяца", "месяцев", "месяцев") + "</b></div>" +
+        '<div class="row2"><span>Общая разница</span><b class="' + (dd > 0.5 ? "up" : dd < -0.5 ? "down" : "") + '">' +
+        (Math.abs(dd) < 0.5 ? "±0" : signed(dd)) + " грн</b></div></section>";
+    }
+    return h + goals + settings;
+  }
+  function tile(v, label) { return '<div class="tile"><b>' + fmt(v) + "</b><small>" + label + "</small></div>"; }
+
   /* ---------- вкладки управления (план 015, G-006 а) ---------- */
-  var TABS = [["stat", "📊", "Статистика"], ["rates", "💰", "Тарифы"], ["packs", "📦", "Посылки"], ["hours", "⏱", "Часы"]];
+  var TABS = [["stat", "📊", "Статистика"], ["rates", "💰", "Тарифы"], ["packs", "📦", "Посылки"], ["hours", "⏱", "Часы"],
+    ["profile", "👤", "Профиль"]];
   var SHIFT_RATES = [["hourly", "Ставка за час"], ["regular", "Обычная выдача"], ["alco_small", "Алко-чек <100"],
     ["alco_big", "Алко-чек >100"], ["mp", "МП"], ["me", "МЕ"]];          // порядок r
   var PACK_RATES = [["pk_in_meest", "Приём Meest", "от клиента"], ["pk_in_merchant", "Приём Мерчант", "от клиента"],
@@ -512,6 +608,7 @@
     if (state.tab === "rates") return h + ratesBlock(d);
     if (state.tab === "packs") return h + packsBlock(d);
     if (state.tab === "hours") return h + hoursBlock(d);
+    if (state.tab === "profile") return h + profileBlock(d);
     h += calBlock(d);   // план 012: сверху календарь и выбранный день, ниже — дашборд текущего месяца
     h += '<section class="sec"><div class="cap">Сегодня, ' + esc(ddmm(d.date)) + "</div>";
     if (d.today !== null) {
@@ -731,5 +828,5 @@
 
   draw();
   window.PaydayMiniApp = { parseHash: parseHash, readData: readData, shifts: shifts, shiftParam: shiftParam, payParam: payParam,
-    rateParam: rateParam, packsParam: packsParam, hoursParam: hoursParam };
+    rateParam: rateParam, packsParam: packsParam, hoursParam: hoursParam, readProfile: readProfile };
 })();
