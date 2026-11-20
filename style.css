@@ -198,3 +198,15 @@ input.date { display: block; width: 100%; margin-top: 8px; }
 .gd .pl { position: absolute; top: 3px; right: 5px; font-style: normal; font-size: 12px; font-weight: 700; line-height: 1; }
 .gplg { color: var(--accent); font-size: 12px; }
 .gextra { font-size: 13px; margin-top: 8px; }
+/* --- план 020: отпуск и больничный --- */
+.cal .d.lv-vac { background: rgba(245, 166, 35, .4); }
+.cal .d.lv-sick { background: rgba(229, 115, 115, .35); }
+.sub.small { font-size: 12px; }
+.lfield { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 8px; font-size: 14px; }
+.lfield input { font: inherit; width: 52%; padding: 7px 9px; border-radius: 9px; border: 1px solid rgba(127,127,127,.3);
+  background: var(--bg); color: var(--text); }
+/* --- план 021: RU | UA справа сверху --- */
+.langbar { display: flex; justify-content: flex-end; gap: 2px; margin-bottom: -4px; }
+.langbar button { font: inherit; font-size: 12px; font-weight: 700; padding: 4px 10px; border: 0; border-radius: 7px;
+  background: var(--section); color: var(--hint); cursor: pointer; }
+.langbar button[aria-pressed="true"] { background: var(--accent); color: var(--accent-text); }

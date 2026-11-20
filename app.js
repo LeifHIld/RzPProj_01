@@ -6,7 +6,8 @@
    План 015: hh / phh — обычные часы месяца: у таких смен «:часы» нет; пустая сумма («12::…») — считаем по r;
    pr / pq нет — те же, что r / q; q / pq — тарифы приёма и курьера, kk / pkk — посылки по графам.
    План 016: pf — итоги за всё время для «👤 Профиля» (28 значений, см. bot.profile_field), nm — имя в таблице.
-   План 019: nb — имя в таблице в base64 (вместо nm), gr / gn — график текущего / следующего месяца (bot.sched_field). */
+   План 019: nb — имя в таблице в base64 (вместо nm), gr / gn — график текущего / следующего месяца (bot.sched_field).
+   План 020: lv / plv — отпуск и больничный (bot.leave_field). План 021: lg=uk — украинский (словарь — uk.js). */
 (function () {
   "use strict";
   var tg = window.Telegram && window.Telegram.WebApp;
@@ -104,17 +105,122 @@
     d.dh = num(p.dh) !== null ? num(p.dh) : 12;
     var r = list(p.r, 6), pr = list(p.pr, 6) || r, q = list(p.q, 6), pq = list(p.pq, 6) || q;
     d.cal = [{ key: "cur", year: d.year, month: d.month, gross: d.gross, net: d.net, paid: num(p.p),
-      shifts: shifts(p.s, num(p.hh), r), rates: r, card: card(""), q: q, kk: list(p.kk, 6) }];
+      shifts: shifts(p.s, num(p.hh), r), rates: r, card: card(""), q: q, kk: list(p.kk, 6),
+      leaves: readLeaves(p.lv, d.year, d.month) }];   // план 020
     if (pym && num(p.pg) !== null && num(p.pn) !== null) {
       d.cal.unshift({ key: "prev", year: +pym[1], month: +pym[2], gross: num(p.pg), net: num(p.pn), paid: num(p.pp),
-        shifts: shifts(p.ps, num(p.phh), pr), rates: pr, card: card("p"), q: pq, kk: list(p.pkk, 6) });
+        shifts: shifts(p.ps, num(p.phh), pr), rates: pr, card: card("p"), q: pq, kk: list(p.pkk, 6),
+        leaves: readLeaves(p.plv, +pym[1], +pym[2]) });
     }
     d.pf = readProfile(p.pf);   // план 016
     d.nm = (p.nb ? b64text(p.nb) : p.nm ? String(p.nm) : "").slice(0, 40);   // план 019: nb — base64, nm — старые снимки
     var nx = d.month === 12 ? [d.year + 1, 1] : [d.year, d.month + 1];
     d.gr = readSched(p.gr, d.year, d.month);   // план 019: «📅 Мой график» — текущий и следующий месяц
     d.gn = readSched(p.gn, nx[0], nx[1]);
+    d.lang = p.lg === "uk" ? "uk" : "ru";   // план 021
     return d;
+  }
+
+  /* ---------- язык (план 021): RU | UA, перевод — словарь из uk.js (тот же, что у бота) ---------- */
+  var UKD = window.PAYDAY_UK || null, UK_RX = null, LANG = "ru";
+  var NOT_LETTER = "[^0-9A-Za-zА-Яа-яЁёІіЇїЄєҐґ_]";
+  function ukCase(src, dst) {
+    var letters = src.replace(/[^A-Za-zА-Яа-яЁёІіЇїЄєҐґ]/g, "");
+    if (letters.length > 1 && letters === letters.toUpperCase()) return dst.toUpperCase();
+    if (src.charAt(0) !== src.charAt(0).toLowerCase()) return dst.charAt(0).toUpperCase() + dst.slice(1);
+    return dst;
+  }
+  function toUk(s) {
+    if (!UKD || typeof s !== "string" || !/[А-Яа-яЁё]/.test(s) || UKD.bilingual.indexOf(s) >= 0) return s;
+    if (Object.prototype.hasOwnProperty.call(UKD.exact, s)) return UKD.exact[s];
+    if (!UK_RX) {
+      var keys = Object.keys(UKD.keys).sort(function (a, b) { return b.length - a.length; });
+      UK_RX = new RegExp("(^|" + NOT_LETTER + ")(" + keys.map(function (k) { return k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); })
+        .join("|") + ")(?!" + NOT_LETTER.replace("[^", "[") + ")", "gi");
+    }
+    return s.replace(UK_RX, function (m, pre, w) { return pre + ukCase(w, UKD.keys[w.toLowerCase()]); });
+  }
+  function L(s) { return LANG === "uk" ? toUk(s) : s; }
+  /* ---------- отпуск и больничный (план 020): lv / plv — «o|b ДДММ ДДММ _ сумма36 _ часть36» через «.» ---------- */
+  var LEAVE = { vac: ["🏖", "Отпуск", "отпускные", "otpusk", "отп"], sick: ["🤒", "Больничный", "больничные", "bolnichny", "бол"] };
+  function readLeaves(v, y, m) {
+    if (!v || !y) return [];
+    var nd = new Date(y, m, 0).getDate();
+    return String(v).split(".").map(function (e) {
+      var a = /^([ob])(\d{2})(\d{2})(\d{2})(\d{2})_([0-9a-z]*)_([0-9a-z]*)$/.exec(e);
+      if (!a) return null;
+      var sd = +a[2], sm = +a[3], ed = +a[4], em = +a[5], from = sm === m ? sd : 1, to = em === m ? ed : nd;
+      if (from < 1 || to > nd || from > to) return null;
+      return { kind: a[1] === "o" ? "vac" : "sick", sd: sd, sm: sm, ed: ed, em: em, from: from, to: to,
+        total: a[6] ? parseInt(a[6], 36) : null, part: a[7] ? parseInt(a[7], 36) : null };
+    }).filter(Boolean);
+  }
+  function leaveOn(m, day) {
+    var l = (m && m.leaves) || [];
+    for (var k = 0; k < l.length; k++) if (day >= l[k].from && day <= l[k].to) return l[k];
+    return null;
+  }
+  function leavePeriod(lv) { return two(lv.sd) + "." + two(lv.sm) + (lv.sd === lv.ed && lv.sm === lv.em ? "" : "–" + two(lv.ed) + "." + two(lv.em)); }
+  function leaveMoney(m, kind) {
+    return ((m && m.leaves) || []).reduce(function (a, l) { return a + (!kind || l.kind === kind ? l.part || 0 : 0); }, 0);
+  }
+  function dayNum(iso) {   // «2026-11-28» → номер дня (UTC), чтобы считать дни без перевода часов
+    var a = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || "");
+    return a ? Date.UTC(+a[1], +a[2] - 1, +a[3]) / 864e5 : null;
+  }
+  function leaveSplit(from, to, amount) {   // как calc.leave_split: [{y, m, days, money}], копейки — в последний месяц
+    var a = dayNum(from), b = dayNum(to);
+    if (a === null || b === null || b < a) return [];
+    var out = [], total = b - a + 1, x = a;
+    while (x <= b) {
+      var dt = new Date(x * 864e5), y = dt.getUTCFullYear(), mo = dt.getUTCMonth() + 1;
+      var last = Math.min(Date.UTC(y, mo, 0) / 864e5, b);
+      out.push({ y: y, m: mo, days: last - x + 1, money: null });
+      x = last + 1;
+    }
+    if (amount !== null && amount !== undefined && isFinite(amount)) {
+      var acc = 0;
+      out.forEach(function (p, k) {
+        p.money = k === out.length - 1 ? Math.round((amount - acc) * 100) / 100 : Math.round(amount * p.days / total * 100) / 100;
+        acc += p.money;
+      });
+    }
+    return out;
+  }
+  function leaveParam(kind, from, to, amount) {   // «lv_o_20261128_20261205_6400-5» (bot.parse_miniapp_leave)
+    var a = dayNum(from), b = dayNum(to);
+    if (a === null || b === null || b < a || b - a >= 366) return null;
+    if (amount !== null && !(amount >= 0 && amount <= 10000000)) return null;
+    return "lv_" + (kind === "vac" ? "o" : "b") + "_" + from.replace(/-/g, "") + "_" + to.replace(/-/g, "") +
+      (amount !== null ? "_" + String(Math.round(amount * 100) / 100).replace(".", "-") : "");
+  }
+  function daysWord(n) { return n + " " + plural(n, "день", "дня", "дней"); }
+  function leaveCard(m, lv) {
+    var t = LEAVE[lv.kind];
+    return '<div class="row2"><span>' + t[0] + " " + t[1] + " " + leavePeriod(lv) + "</span><b>" +
+      (lv.total !== null ? fmt(lv.total) + " грн" : "сумма не задана") + "</b></div>" +
+      (lv.part !== null && lv.total !== null && lv.part !== lv.total ? '<div class="note">в ' + PREPOSITIONAL[m.month] + " " +
+        daysWord(lv.to - lv.from + 1) + " → " + fmt(lv.part) + " грн</div>" : "") +
+      '<div class="note">Изменить или удалить — в чате: /' + t[3] + "</div>";
+  }
+  function leaveForm(d) {
+    var f = state.leave, amount = f.amount === "" ? null : Number(f.amount), parts = leaveSplit(f.from, f.to, amount);
+    var split = parts.length ? daysWord(parts.reduce(function (a, p) { return a + p.days; }, 0)) +
+      (parts.length > 1 || amount !== null ? " · " + parts.map(function (p) {
+        return MONTHS[p.m] + " " + p.days + (p.money !== null ? " → " + fmt(p.money) : "");
+      }).join(" · ") : "") : "Проверьте даты: «по» не раньше «с»";
+    return '<section class="sec"><div class="cap">🏖 Отпуск / больничный</div>' +
+      '<div class="seg" role="group" aria-label="Что внести">' +
+      '<button type="button" data-lkind="vac" aria-pressed="' + (f.kind === "vac") + '">🏖 Отпуск</button>' +
+      '<button type="button" data-lkind="sick" aria-pressed="' + (f.kind === "sick") + '">🤒 Больничный</button></div>' +
+      '<label class="lfield"><span>С</span><input id="leave-from" type="date" value="' + esc(f.from) + '"></label>' +
+      '<label class="lfield"><span>По</span><input id="leave-to" type="date" value="' + esc(f.to) + '"></label>' +
+      '<label class="lfield"><span>Сумма, грн (можно позже)</span><input id="leave-amount" type="number" inputmode="decimal" ' +
+      'min="0" step="0.01" placeholder="—" value="' + esc(f.amount) + '"></label>' +
+      '<div class="note" id="leave-split">' + esc(split) + "</div>" +
+      '<button type="button" class="btn main" data-act="leave-save"' + (d.bot ? "" : " disabled") + ">Сохранить</button>" +
+      '<button type="button" class="more" data-act="leave-cancel">Отмена</button>' +
+      '<div class="note">Откроется чат — бот покажет проверку, записывает по ✅.</div></section>';
   }
   function b64text(v) {
     try {
@@ -162,7 +268,8 @@
       if (!g) continue;
       for (var day = list[i][1]; day <= g.days.length; day++) {
         var e = g.days[day - 1];
-        if (e && e.k === "w" && !(g === d.gr && day === d.todayDay && done[day])) return { g: g, day: day, e: e };
+        if (e && e.k === "w" && !(g === d.gr && day === d.todayDay && done[day]) &&
+            !(g === d.gr && leaveOn(d.cal[d.cal.length - 1], day))) return { g: g, day: day, e: e };   // в отпуске смены нет
       }
     }
     return null;
@@ -201,7 +308,11 @@
     var work = 0, hours = 0, entered = 0, ahead = 0, missed = [], away = false, vac = [], extra = [];
     for (var day = 1; day <= nd; day++) {
       var e = schedDay(g, day), cls = "gd", small = "", plus = "", label = day + " " + GENITIVE[g.m] + ": ";
-      if (e && e.k === "w") {
+      var lvd = isCur && !done[day] ? leaveOn(cur, day) : null;   // план 020: внесённый отпуск / больничный — оранжевым
+      if (lvd) {
+        if (e && e.k === "w") work++;
+        cls += " o"; away = true; small = LEAVE[lvd.kind][4]; label += LEAVE[lvd.kind][1].toLowerCase();
+      } else if (e && e.k === "w") {
         work++;
         hours += e.h || d.dh;
         if (today && day < today && !done[day]) { cls += " miss"; small = "!"; missed.push(day); label += "смена, в боте её нет"; }
@@ -271,6 +382,11 @@
     var h = '<section class="sec">' + navHead(d, m) +
       '<div class="sub center"><b>' + fmt(m.gross) + " грн</b> грязными · <b>" + fmt(m.net) + "</b> чистыми · " +
       m.shifts.length + " " + plural(m.shifts.length, "смена", "смены", "смен") + "</div>";
+    var lvac = leaveMoney(m, "vac"), lsick = leaveMoney(m, "sick");   // план 020
+    if (lvac || lsick) {
+      h += '<div class="sub center small">в т. ч. ' + [lvac ? "🏖 отпускные " + fmt(lvac) + " грн" : "",
+        lsick ? "🤒 больничные " + fmt(lsick) + " грн" : ""].filter(Boolean).join(" · ") + "</div>";
+    }
     if (m.paid !== null) {
       var diff = m.paid - m.net;
       h += '<div class="sub center">💳 на карту ' + fmt(m.paid) + " · " +
@@ -293,16 +409,17 @@
     var cells = WD.map(function (w) { return '<span class="wd">' + w + "</span>"; }).join("");
     for (var e = 0; e < first; e++) cells += '<span class="d empty" aria-hidden="true"></span>';
     for (var day = 1; day <= nd; day++) {
-      var s = byDay[day], cls = "d" + (s ? " " + level(s.t, avg) : "") + (day === sel ? " sel" : "") +
-        (day === today ? " today" : "") + (today && day > today ? " future" : "");
-      var label = day + " " + GENITIVE[m.month] + (s ? ": " + fmt(s.t) + " грн" : ": смены нет");
+      var s = byDay[day], lv = s ? null : leaveOn(m, day);
+      var cls = "d" + (s ? " " + level(s.t, avg) : "") + (lv ? " lv-" + lv.kind : "") + (day === sel ? " sel" : "") +
+        (day === today ? " today" : "") + (today && day > today && !lv ? " future" : "");
+      var label = day + " " + GENITIVE[m.month] + (s ? ": " + fmt(s.t) + " грн" : lv ? ": " + LEAVE[lv.kind][1].toLowerCase() : ": смены нет");
       cells += '<button type="button" class="' + cls + '" data-day="' + day + '" aria-label="' + esc(label) + '"' +
         (day === sel ? ' aria-pressed="true"' : "") + '><span class="n">' + day + "</span>" +
-        (s ? '<small>' + short(s.t) + "</small>" : "") + "</button>";
+        (s ? '<small>' + short(s.t) + "</small>" : lv ? "<small>" + LEAVE[lv.kind][0] + "</small>" : "") + "</button>";
     }
     h += '<section class="sec"><div class="cal">' + cells + "</div>" +
       '<div class="legend"><span>&lt;85 %</span><i class="lg l1"></i><i class="lg l2"></i><i class="lg l3"></i><i class="lg l4"></i>' +
-      "<span>&gt;115 % средней смены</span></div></section>";
+      "<span>&gt;115 % средней смены</span>" + (m.leaves.length ? "<span>· 🏖 отпуск · 🤒 больничный</span>" : "") + "</div></section>";
 
     if (sel) {
       var ss = byDay[sel], wdName = cap(WD_FULL[wdIndex(m.year, m.month, sel)]);
@@ -321,13 +438,19 @@
         if (state.dayOpen) h += breakdown(ss, m.rates);
         h += '<div class="row2"><button type="button" class="more" data-act="dmore">' + (state.dayOpen ? "Свернуть ▴" : "Подробнее ▾") +
           '</button><button type="button" class="more" data-act="edit"' + (d.bot ? "" : " disabled") + ">✏️ Изменить</button></div>";
+      } else if (leaveOn(m, sel)) {   // план 020: день отпуска / больничного
+        h += leaveCard(m, leaveOn(m, sel));
       } else if (future) {
         h += '<div class="sub">Этот день ещё не наступил</div>';
       } else {
         h += '<div class="sub">Смены нет</div>' + (d.bot ? '<button type="button" class="more" data-act="edit">➕ Добавить смену на этот день</button>' : "");
       }
+      if (ss && !editing && leaveOn(m, sel)) h += leaveCard(m, leaveOn(m, sel));   // смена в день отпуска
       h += "</section>";
     }
+    // план 020: «🏖 Отпуск / больничный» — форма под календарём
+    if (state.leave) h += leaveForm(d);
+    else if (d.bot) h += '<button type="button" class="btn second" data-act="leave-open">🏖 Отпуск / больничный</button>';
     return h;
   }
 
@@ -349,13 +472,20 @@
   }
   function nice(x) { return Number(x.toFixed(2)).toLocaleString("ru-RU").replace(",", "."); }
   function monthCard(m) {
-    var c = m.card || {}, km = c.km || 0, hp = c.hp || 0, piece = m.gross - km - hp;
+    var c = m.card || {}, km = c.km || 0, hp = c.hp || 0, lm = leaveMoney(m), piece = m.gross - km - hp - lm;
     var hours = m.shifts.reduce(function (a, s) { return a + s.h; }, 0);
+    var away = ["vac", "sick"].map(function (k) {   // план 020: отпускные и больничные отдельной строкой
+      var ls = m.leaves.filter(function (l) { return l.kind === k; });
+      if (!ls.length) return "";
+      var n = ls.reduce(function (a, l) { return a + l.to - l.from + 1; }, 0), mo = leaveMoney(m, k);
+      return '<div class="row2"><span>' + LEAVE[k][0] + " " + cap(LEAVE[k][2]) + " · " + daysWord(n) + "</span><b>" +
+        (ls.some(function (l) { return l.part !== null; }) ? fmt(mo) + " грн" : "сумма не задана") + "</b></div>";
+    }).join("");
     return '<div class="mcard"><div class="row2"><span>Сдельно (выдачи и чеки)</span><b>' + fmt(piece) + " грн</b></div>" +
       '<div class="row2"><span>Часы · ' + (c.mh !== null && c.mh !== undefined ? nice(c.mh) + " — введено" : nice(hours) + " — по сменам") +
       "</span><b>" + fmt(hp) + " грн</b></div>" +
       '<div class="row2"><span>Приём и курьер · ' + fmt(c.kc || 0) + " " + plural(c.kc || 0, "посылка", "посылки", "посылок") +
-      "</span><b>" + fmt(km) + " грн</b></div>" +
+      "</span><b>" + fmt(km) + " грн</b></div>" + away +
       '<div class="row2 sub"><span>ПДФО 18 % · военный сбор 5 %</span><span>−' + fmt(m.gross - m.net) + " грн</span></div></div>";
   }
 
@@ -733,7 +863,9 @@
   }
 
   function render(d) {
-    var h = "";
+    var h = '<div class="langbar" role="group" aria-label="RU / UA">' +   // план 021: язык — справа сверху
+      '<button type="button" data-lang="ru" aria-pressed="' + (LANG === "ru") + '">RU</button>' +
+      '<button type="button" data-lang="uk" aria-pressed="' + (LANG === "uk") + '">UA</button></div>';
     if (state.stale) {   // открыли с ярлыка или из профиля бота — снимок из облака Telegram (планы 014, 015)
       var t = new Date(state.stale);
       h += '<div class="stale">Цифры на ' + two(t.getDate()) + "." + two(t.getMonth() + 1) + ", " + two(t.getHours()) + ":" +
@@ -759,10 +891,14 @@
     h += "</section>";
     if (d.cmp) {
       var c = d.cmp;
+      var cm = d.cal[d.cal.length - 1], away = { vac: 0, sick: 0 };   // план 020: «в ноябре 3 дня отпуска»
+      cm.leaves.forEach(function (l) { away[l.kind] += Math.max(0, Math.min(l.to, c.day) - l.from + 1); });
+      var awayN = away.vac + away.sick, awayW = [away.vac ? "отпуска" : "", away.sick ? "больничного" : ""].filter(Boolean).join(" и ");
       h += '<section class="sec"><div class="cap">К ' + DATIVE[c.pm] + " на то же число (1–" + c.day + ")</div>" +
         '<div class="row2"><span>За смены</span><b>' + delta(c.money[0], c.money[1], true) + "</b></div>" +
         '<div class="row2"><span>Смен</span><b>' + delta(c.n[0], c.n[1]) + "</b></div>" +
-        '<div class="row2"><span>Все выдачи</span><b>' + delta(c.issued[0], c.issued[1]) + "</b></div></section>";
+        '<div class="row2"><span>Все выдачи</span><b>' + delta(c.issued[0], c.issued[1]) + "</b></div>" +
+        (awayN ? '<div class="note">в ' + PREPOSITIONAL[cm.month] + " " + daysWord(awayN) + " " + awayW + "</div>" : "") + "</section>";
     }
     h += curveBlock(d);   // план 014: кривая месяца перед «По дням недели»
     h += '<section class="sec"><div class="cap">По дням недели · ' + esc(ddmm(d.bs)) + "–" + esc(ddmm(d.be)) +
@@ -794,10 +930,14 @@
   var app = document.getElementById("app");
   var hash = window.location.hash;
   var data = readData(parseHash(hash));
+  if (data) LANG = data.lang;
   var state = { unit: "money", view: "cur", sel: {}, dayOpen: false, monthOpen: false, form: null, payOpen: null,
-    stale: null, homeOk: false, tab: "stat", rate: null, packs: {}, hours: {}, gview: "cur" };
+    stale: null, homeOk: false, tab: "stat", rate: null, packs: {}, hours: {}, gview: "cur", leave: null };
   function shown() { return data.cal[state.view === "prev" && data.cal.length > 1 ? 0 : data.cal.length - 1]; }
-  function draw() { app.innerHTML = data ? render(data) : emptyView(); }
+  function draw() {
+    app.innerHTML = data ? L(render(data)) : emptyView();
+    document.documentElement.lang = LANG === "uk" ? "uk" : "ru";
+  }
   function haptic() { try { if (tg && tg.HapticFeedback) tg.HapticFeedback.selectionChanged(); } catch (e) { /* нет — не важно */ } }
   function vibe() { try { if (tg && tg.HapticFeedback) tg.HapticFeedback.impactOccurred("light"); } catch (e) { /* нет */ } }
 
@@ -819,7 +959,15 @@
     var b = e.target.closest("button");
     if (!b || !data || b.disabled) return;
     var m = shown(), act = b.dataset.act;
-    if (b.dataset.tab) { state.tab = b.dataset.tab; state.rate = null; haptic(); draw(); window.scrollTo(0, 0); }
+    if (b.dataset.lang) {   // план 021: RU | UA — страница сразу, бот и чат — через ссылку (D-59)
+      if (b.dataset.lang !== LANG) {
+        LANG = b.dataset.lang;
+        haptic();
+        draw();
+        if (data.bot) go(data.bot, "lang_" + LANG);
+      }
+    }
+    else if (b.dataset.tab) { state.tab = b.dataset.tab; state.rate = null; haptic(); draw(); window.scrollTo(0, 0); }
     else if (b.dataset.rate) {   // план 015: «💰 Тарифы» — открыть / закрыть правку тарифа
       var key = b.dataset.rate, cur = data.cal[data.cal.length - 1], k = RATE_KEYS.indexOf(key);
       var vals = k < 6 ? cur.rates : cur.q, now = vals ? vals[k % 6] : NaN;
@@ -870,8 +1018,25 @@
     }
     else if (b.dataset.unit) { state.unit = b.dataset.unit; draw(); }
     else if (b.dataset.nav) { state.view = b.dataset.nav; state.form = null; state.payOpen = null; draw(); }
+    else if (act === "leave-open") {   // план 020: форма «🏖 Отпуск / больничный», по умолчанию — выбранный день
+      var ld = state.sel[m.key] || data.todayDay || 1, liso = m.year + "-" + two(m.month) + "-" + two(ld);
+      state.leave = { kind: "vac", from: liso, to: liso, amount: "" };
+      haptic();
+      draw();
+      var lf = document.getElementById("leave-from");
+      if (lf) lf.scrollIntoView({ block: "center" });
+    }
+    else if (b.dataset.lkind) { state.leave.kind = b.dataset.lkind; draw(); }
+    else if (act === "leave-cancel") { state.leave = null; draw(); }
+    else if (act === "leave-save") {
+      var la = state.leave.amount === "" ? null : Number(state.leave.amount);
+      var lp = leaveParam(state.leave.kind, state.leave.from, state.leave.to, la);
+      if (!lp) { alertMsg("Проверьте даты (не больше года, «по» не раньше «с») и сумму."); return; }
+      vibe();
+      go(data.bot, lp);
+    }
     else if (b.dataset.day) {
-      var day = +b.dataset.day, has = m.shifts.some(function (x) { return x.d === day; });
+      var day = +b.dataset.day, has = m.shifts.some(function (x) { return x.d === day; }) || !!leaveOn(m, day);
       state.sel[m.key] = day;
       state.form = null;
       // G-005 б: нажали пустой прошедший день или сегодня — сразу форма
@@ -916,6 +1081,20 @@
       return;
     }
     if (el.id === "rate-date" && state.rate) { state.rate.other = el.value; setText("rate-save", rateSaveText(data)); return; }
+    if (state.leave && (el.id === "leave-from" || el.id === "leave-to" || el.id === "leave-amount")) {   // план 020
+      state.leave[el.id === "leave-from" ? "from" : el.id === "leave-to" ? "to" : "amount"] = el.value;
+      if (el.id === "leave-from" && dayNum(state.leave.to) < dayNum(el.value)) {
+        state.leave.to = el.value;
+        var lt = document.getElementById("leave-to");
+        if (lt) lt.value = el.value;
+      }
+      var lst = state.leave, am = lst.amount === "" ? null : Number(lst.amount), ps = leaveSplit(lst.from, lst.to, am);
+      setText("leave-split", ps.length ? daysWord(ps.reduce(function (a, p) { return a + p.days; }, 0)) +
+        (ps.length > 1 || am !== null ? " · " + ps.map(function (p) {
+          return MONTHS[p.m] + " " + p.days + (p.money !== null ? " → " + fmt(p.money) : "");
+        }).join(" · ") : "") : "Проверьте даты: «по» не раньше «с»");
+      return;
+    }
     if (el.dataset && el.dataset.pk !== undefined && m) {
       packVals(m)[+el.dataset.pk] = isFinite(v) && v >= 0 ? Math.min(99999, Math.floor(v)) : 0;
       updatePacks(m);
@@ -942,7 +1121,7 @@
     var rs = app.querySelector('[data-act="packs-reset"]');
     if (rs) rs.disabled = !changed;
   }
-  function alertMsg(text) { if (tg && tg.showAlert) tg.showAlert(text); else window.alert(text); }
+  function alertMsg(text) { text = L(text); if (tg && tg.showAlert) tg.showAlert(text); else window.alert(text); }
 
   /* ---------- снимок в облаке Telegram и ярлык на экран (план 014, G-004 а) ---------- */
   var cloud = tg && tg.CloudStorage && tg.isVersionAtLeast && tg.isVersionAtLeast("6.9") ? tg.CloudStorage : null;
@@ -958,7 +1137,7 @@
       try {
         var snap = JSON.parse(val);
         data = readData(parseHash(snap.h));
-        if (data) { state.stale = snap.at; draw(); }
+        if (data) { LANG = data.lang; state.stale = snap.at; draw(); }
       } catch (e) { /* снимок испорчен — остаётся подсказка */ }
     });
   }
@@ -975,5 +1154,5 @@
   draw();
   window.PaydayMiniApp = { parseHash: parseHash, readData: readData, shifts: shifts, shiftParam: shiftParam, payParam: payParam,
     rateParam: rateParam, packsParam: packsParam, hoursParam: hoursParam, readProfile: readProfile, readSched: readSched,
-    b64text: b64text };
+    b64text: b64text, readLeaves: readLeaves, leaveSplit: leaveSplit, leaveParam: leaveParam, toUk: toUk };
 })();
