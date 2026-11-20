@@ -194,3 +194,7 @@ input.date { display: block; width: 100%; margin-top: 8px; }
 .gempty .ico { font-size: 30px; }
 .gempty b { display: block; margin: 4px 0 2px; }
 .btn.gbtn { margin-top: 10px; background: var(--bg); }
+/* план 019 v2 (D-53): смена сверх графика */
+.gd .pl { position: absolute; top: 3px; right: 5px; font-style: normal; font-size: 12px; font-weight: 700; line-height: 1; }
+.gplg { color: var(--accent); font-size: 12px; }
+.gextra { font-size: 13px; margin-top: 8px; }

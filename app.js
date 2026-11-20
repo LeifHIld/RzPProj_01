@@ -183,7 +183,7 @@
     var g = state.gview === "next" && d.gn || !d.gr ? d.gn : d.gr, isCur = g === d.gr;
     var today = isCur ? d.todayDay : null, nd = new Date(g.y, g.m, 0).getDate();
     var cur = d.cal[d.cal.length - 1], done = {};
-    if (isCur) cur.shifts.forEach(function (s) { done[s.d] = true; });
+    if (isCur) cur.shifts.forEach(function (s) { done[s.d] = s; });
     var h = '<section class="sec"><div class="calhead gnav"><span class="cap">📅 Мой график</span><span>' +
       '<button type="button" data-gnav="cur" aria-label="Текущий месяц"' + (!isCur && d.gr ? "" : " disabled") + ">‹</button>" +
       "<b>" + cap(MONTHS[g.m]) + "</b>" +
@@ -198,9 +198,9 @@
     }
     var first = wdIndex(g.y, g.m, 1), cells = WD.map(function (w) { return '<span class="wd">' + w + "</span>"; }).join("");
     for (var k = 0; k < first; k++) cells += '<span class="gd empty" aria-hidden="true"></span>';
-    var work = 0, hours = 0, entered = 0, ahead = 0, missed = [], away = false, vac = [];
+    var work = 0, hours = 0, entered = 0, ahead = 0, missed = [], away = false, vac = [], extra = [];
     for (var day = 1; day <= nd; day++) {
-      var e = schedDay(g, day), cls = "gd", small = "", label = day + " " + GENITIVE[g.m] + ": ";
+      var e = schedDay(g, day), cls = "gd", small = "", plus = "", label = day + " " + GENITIVE[g.m] + ": ";
       if (e && e.k === "w") {
         work++;
         hours += e.h || d.dh;
@@ -209,6 +209,10 @@
         else { cls += isCur && today === null ? " w" : " p"; ahead++; label += "смена"; }
         if (!small) small = e.h ? nice(e.h) + " ч" : "смена";
         if (e.h) label += ", " + nice(e.h) + " ч";
+      } else if (done[day]) {   // план 019 v2 (D-53): смена из статистики в день вне графика — замена в другом магазине
+        cls += " w plus"; entered++; extra.push(day);
+        small = nice(done[day].h) + " ч"; plus = '<i class="pl" aria-hidden="true">＋</i>';
+        label += "смена сверх графика, " + nice(done[day].h) + " ч";
       } else if (e && (e.k === "vac" || e.k === "sick")) {
         cls += " o"; away = true; small = e.k === "vac" ? "отп" : "бол"; label += e.k === "vac" ? "отпуск" : "больничный";
         if (e.k === "vac") vac.push(day);
@@ -217,11 +221,12 @@
       }
       if (day === today) cls += " today";
       cells += '<span class="' + cls + '" role="img" aria-label="' + esc(label) + '"><span class="n">' + day + "</span>" +
-        (small ? "<small>" + small + "</small>" : "") + "</span>";
+        (small ? "<small>" + small + "</small>" : "") + plus + "</span>";
     }
     h += '<div class="gcal">' + cells + "</div>";
     h += '<div class="glg">' + (today ? '<span><i class="w"></i>отработано</span><span><i class="p"></i>впереди</span>'
-      : '<span><i class="p"></i>смена</span>') + '<span><i class="x"></i>выходной</span>' +
+      : '<span><i class="p"></i>смена</span>') + (extra.length ? '<span><b class="gplg">＋</b>сверх графика</span>' : "") +
+      '<span><i class="x"></i>выходной</span>' +
       (away ? '<span><i class="o"></i>отпуск, больничный</span>' : "") + (today ? '<span><i class="t"></i>сегодня</span>' : "") + "</div>";
     if (isCur && today) {
       h += '<div class="tiles t3 gtiles">' + tile(work, "смен по графику") + tile(entered, "внесено в бот") + tile(ahead, "впереди") + "</div>";
@@ -229,6 +234,10 @@
       h += '<div class="tiles' + (vac.length ? " t3" : "") + ' gtiles">' + tile(work, plural(work, "смена", "смены", "смен") + " по графику") +
         '<div class="tile"><b>' + nice(hours) + " ч</b><small>по графику</small></div>" +
         (vac.length ? '<div class="tile"><b>' + vac[0] + (vac.length > 1 ? "–" + vac[vac.length - 1] : "") + "</b><small>отпуск</small></div>" : "") + "</div>";
+    }
+    if (extra.length) {
+      h += '<div class="gextra">＋' + extra.length + " " + plural(extra.length, "смена", "смены", "смен") + " сверх графика: " +
+        extra.map(function (x) { return two(x) + "." + two(g.m); }).join(", ") + "</div>";
     }
     missed.slice(0, 3).forEach(function (md) {
       h += '<div class="gwarn">⚠️ ' + two(md) + "." + two(g.m) + " по графику смена, а в боте её нет" +
