@@ -5,7 +5,8 @@
    План 014: r / pr — тарифы (час, обычн, алко<100, алко>100, МП, МЕ), dh, kc/km/hp/mh? и pkc/pkm/php/pmh?.
    План 015: hh / phh — обычные часы месяца: у таких смен «:часы» нет; пустая сумма («12::…») — считаем по r;
    pr / pq нет — те же, что r / q; q / pq — тарифы приёма и курьера, kk / pkk — посылки по графам.
-   План 016: pf — итоги за всё время для «👤 Профиля» (28 значений, см. bot.profile_field), nm — имя в таблице. */
+   План 016: pf — итоги за всё время для «👤 Профиля» (28 значений, см. bot.profile_field), nm — имя в таблице.
+   План 019: nb — имя в таблице в base64 (вместо nm), gr / gn — график текущего / следующего месяца (bot.sched_field). */
 (function () {
   "use strict";
   var tg = window.Telegram && window.Telegram.WebApp;
@@ -109,8 +110,132 @@
         shifts: shifts(p.ps, num(p.phh), pr), rates: pr, card: card("p"), q: pq, kk: list(p.pkk, 6) });
     }
     d.pf = readProfile(p.pf);   // план 016
-    d.nm = p.nm ? String(p.nm).slice(0, 40) : "";
+    d.nm = (p.nb ? b64text(p.nb) : p.nm ? String(p.nm) : "").slice(0, 40);   // план 019: nb — base64, nm — старые снимки
+    var nx = d.month === 12 ? [d.year + 1, 1] : [d.year, d.month + 1];
+    d.gr = readSched(p.gr, d.year, d.month);   // план 019: «📅 Мой график» — текущий и следующий месяц
+    d.gn = readSched(p.gn, nx[0], nx[1]);
     return d;
+  }
+  function b64text(v) {
+    try {
+      var bin = atob(String(v).replace(/-/g, "+").replace(/_/g, "/")), bytes = new Uint8Array(bin.length);
+      for (var k = 0; k < bin.length; k++) bytes[k] = bin.charCodeAt(k);
+      return new TextDecoder("utf-8").decode(bytes);
+    } catch (e) { return ""; }
+  }
+
+  /* ---------- «📅 Мой график» (план 019, G-009 а): «знаки по дням,ММДД[,ЧЧММ-ЧЧММ]», см. bot.sched_field ---------- */
+  function readSched(v, y, m) {
+    if (!v || !y) return null;
+    var a = String(v).split(","), codes = a[0] || "";
+    if (!/^[0-9a-oswv_-]{1,31}$/.test(codes)) return null;
+    var days = codes.split("").map(function (c) {
+      if (c === "-") return { k: "off" };
+      if (c === "v") return { k: "vac" };
+      if (c === "s") return { k: "sick" };
+      if (c === "w") return { k: "w", h: null };
+      if (c === "_") return null;
+      var h = parseInt(c, 36);
+      return h >= 1 && h <= 24 ? { k: "w", h: h } : null;
+    });
+    var at = /^(\d{2})(\d{2})$/.exec(a[1] || ""), t = /^(\d{2})(\d{2})-(\d{2})(\d{2})$/.exec(a[2] || ""), timeH = null;
+    if (t) {
+      var mins = ((+t[3] * 60 + +t[4]) - (+t[1] * 60 + +t[2]) + 1440) % 1440 || 1440;
+      timeH = Math.round(mins / 6) / 10;
+    }
+    return { y: y, m: m, days: days, at: at ? at[2] + "." + at[1] : null,
+      time: t ? t[1] + ":" + t[2] + "–" + t[3] + ":" + t[4] : null, timeH: timeH };
+  }
+  function schedDay(g, day) { return g && day >= 1 && day <= g.days.length ? g.days[day - 1] : null; }
+  function schedHours(d, m, day) {   // часы по графику для формы смены (D-51)
+    var g = m.key === "cur" ? d.gr : null, e = schedDay(g, day);
+    return e && e.k === "w" && e.h ? e.h : null;
+  }
+  function shiftWhen(g, e) {   // « · 08:00–20:00» или « · 12 ч»
+    return e.h && g.time && e.h === g.timeH ? " · " + g.time : e.h ? " · " + nice(e.h) + " ч" : "";
+  }
+  function nextShift(d, done) {   // ближайшая смена по графику с сегодняшнего дня (сегодняшняя внесена — со следующей)
+    var today = d.todayDay || 1;
+    var list = [[d.gr, today], [d.gn, 1]];
+    for (var i = 0; i < list.length; i++) {
+      var g = list[i][0];
+      if (!g) continue;
+      for (var day = list[i][1]; day <= g.days.length; day++) {
+        var e = g.days[day - 1];
+        if (e && e.k === "w" && !(g === d.gr && day === d.todayDay && done[day])) return { g: g, day: day, e: e };
+      }
+    }
+    return null;
+  }
+  function whenLabel(d, n) {
+    var wd = WD[wdIndex(n.g.y, n.g.m, n.day)] + " " + two(n.day) + "." + two(n.g.m);
+    if (n.g === d.gr && n.day === d.todayDay) return "сегодня, " + wd;
+    var t = new Date(d.year, d.month - 1, (d.todayDay || 0) + 1);
+    return t.getFullYear() === n.g.y && t.getMonth() + 1 === n.g.m && t.getDate() === n.day ? "завтра, " + wd : wd;
+  }
+  function schedBlock(d) {
+    var up = d.bot ? '<button type="button" class="btn second gbtn" data-go="grafik">📷 Загрузить фото графика</button>' : "";
+    if (!d.gr && !d.gn) {
+      return '<section class="sec"><div class="cap">📅 Мой график</div><div class="gempty"><div class="ico" aria-hidden="true">🗓</div>' +
+        "<b>Графика пока нет</b><div class=\"sub\">Загрузи фото графика — бот найдёт твою строку и покажет смены здесь.</div></div>" +
+        up + "</section>";
+    }
+    var g = state.gview === "next" && d.gn || !d.gr ? d.gn : d.gr, isCur = g === d.gr;
+    var today = isCur ? d.todayDay : null, nd = new Date(g.y, g.m, 0).getDate();
+    var cur = d.cal[d.cal.length - 1], done = {};
+    if (isCur) cur.shifts.forEach(function (s) { done[s.d] = true; });
+    var h = '<section class="sec"><div class="calhead gnav"><span class="cap">📅 Мой график</span><span>' +
+      '<button type="button" data-gnav="cur" aria-label="Текущий месяц"' + (!isCur && d.gr ? "" : " disabled") + ">‹</button>" +
+      "<b>" + cap(MONTHS[g.m]) + "</b>" +
+      '<button type="button" data-gnav="next" aria-label="Следующий месяц"' + (isCur && d.gn ? "" : " disabled") + ">›</button></span></div>";
+    var n = isCur ? nextShift(d, done) : null;
+    if (!isCur) {
+      for (var fd = 1; fd <= g.days.length && !n; fd++) if (g.days[fd - 1] && g.days[fd - 1].k === "w") n = { g: g, day: fd, e: g.days[fd - 1] };
+    }
+    if (n) {
+      h += '<div class="gnext">' + (isCur ? "Следующая смена: <b>" : "Первая смена: <b>") + esc(whenLabel(d, n)) + "</b>" +
+        esc(shiftWhen(n.g, n.e)) + "</div>";
+    }
+    var first = wdIndex(g.y, g.m, 1), cells = WD.map(function (w) { return '<span class="wd">' + w + "</span>"; }).join("");
+    for (var k = 0; k < first; k++) cells += '<span class="gd empty" aria-hidden="true"></span>';
+    var work = 0, hours = 0, entered = 0, ahead = 0, missed = [], away = false, vac = [];
+    for (var day = 1; day <= nd; day++) {
+      var e = schedDay(g, day), cls = "gd", small = "", label = day + " " + GENITIVE[g.m] + ": ";
+      if (e && e.k === "w") {
+        work++;
+        hours += e.h || d.dh;
+        if (today && day < today && !done[day]) { cls += " miss"; small = "!"; missed.push(day); label += "смена, в боте её нет"; }
+        else if (today && day <= today && done[day]) { cls += " w"; entered++; label += "смена, внесена"; }
+        else { cls += isCur && today === null ? " w" : " p"; ahead++; label += "смена"; }
+        if (!small) small = e.h ? nice(e.h) + " ч" : "смена";
+        if (e.h) label += ", " + nice(e.h) + " ч";
+      } else if (e && (e.k === "vac" || e.k === "sick")) {
+        cls += " o"; away = true; small = e.k === "vac" ? "отп" : "бол"; label += e.k === "vac" ? "отпуск" : "больничный";
+        if (e.k === "vac") vac.push(day);
+      } else {
+        label += e ? "выходной" : "нет в графике";
+      }
+      if (day === today) cls += " today";
+      cells += '<span class="' + cls + '" role="img" aria-label="' + esc(label) + '"><span class="n">' + day + "</span>" +
+        (small ? "<small>" + small + "</small>" : "") + "</span>";
+    }
+    h += '<div class="gcal">' + cells + "</div>";
+    h += '<div class="glg">' + (today ? '<span><i class="w"></i>отработано</span><span><i class="p"></i>впереди</span>'
+      : '<span><i class="p"></i>смена</span>') + '<span><i class="x"></i>выходной</span>' +
+      (away ? '<span><i class="o"></i>отпуск, больничный</span>' : "") + (today ? '<span><i class="t"></i>сегодня</span>' : "") + "</div>";
+    if (isCur && today) {
+      h += '<div class="tiles t3 gtiles">' + tile(work, "смен по графику") + tile(entered, "внесено в бот") + tile(ahead, "впереди") + "</div>";
+    } else {
+      h += '<div class="tiles' + (vac.length ? " t3" : "") + ' gtiles">' + tile(work, plural(work, "смена", "смены", "смен") + " по графику") +
+        '<div class="tile"><b>' + nice(hours) + " ч</b><small>по графику</small></div>" +
+        (vac.length ? '<div class="tile"><b>' + vac[0] + (vac.length > 1 ? "–" + vac[vac.length - 1] : "") + "</b><small>отпуск</small></div>" : "") + "</div>";
+    }
+    missed.slice(0, 3).forEach(function (md) {
+      h += '<div class="gwarn">⚠️ ' + two(md) + "." + two(g.m) + " по графику смена, а в боте её нет" +
+        (d.bot ? ' · <button type="button" class="glink" data-gfix="' + md + '">Внести</button>' : "") + "</div>";
+    });
+    if (missed.length > 3) h += '<div class="gwarn">…и ещё ' + (missed.length - 3) + " " + plural(missed.length - 3, "смена", "смены", "смен") + "</div>";
+    return h + up + (g.at ? '<div class="note center">Обновлён ' + g.at + " с фото</div>" : "") + "</section>";
   }
 
   /* ---------- календарь (план 012) ---------- */
@@ -321,6 +446,7 @@
     var photo = u && /^https:\/\//.test(u.photo_url || "") ? '<img src="' + esc(u.photo_url) + '" alt="">' : esc(initials(title));
     var h = '<section class="sec hero"><div class="av" aria-hidden="true">' + photo + "</div><div><b>" + esc(title) + "</b>" +
       "<small>" + esc(sub.join(" · ")) + "</small><small>" + esc(since) + "</small></div></section>";
+    h += schedBlock(d);   // план 019: между «Вы» и «Заработано»
     var issued = p.reg + p.mp + p.me, packs = p.packs.reduce(function (a, x) { return a + x; }, 0);
     var settings = '<section class="sec"><div class="cap">⚙️ Настройки</div>' +
       '<div class="row2"><span>Часы смены по умолчанию</span><b>' + nice(d.dh) + "</b></div>" +
@@ -660,7 +786,7 @@
   var hash = window.location.hash;
   var data = readData(parseHash(hash));
   var state = { unit: "money", view: "cur", sel: {}, dayOpen: false, monthOpen: false, form: null, payOpen: null,
-    stale: null, homeOk: false, tab: "stat", rate: null, packs: {}, hours: {} };
+    stale: null, homeOk: false, tab: "stat", rate: null, packs: {}, hours: {}, gview: "cur" };
   function shown() { return data.cal[state.view === "prev" && data.cal.length > 1 ? 0 : data.cal.length - 1]; }
   function draw() { app.innerHTML = data ? render(data) : emptyView(); }
   function haptic() { try { if (tg && tg.HapticFeedback) tg.HapticFeedback.selectionChanged(); } catch (e) { /* нет — не важно */ } }
@@ -668,8 +794,9 @@
 
   function openForm(m, day) {
     var s = m.shifts.filter(function (x) { return x.d === day; })[0];
-    state.form = { key: m.key, day: day,
-      vals: s ? { r: s.r, as: s.as, ab: s.ab, mp: s.mp, me: s.me, h: s.h } : { r: 0, as: 0, ab: 0, mp: 0, me: 0, h: data.dh } };
+    state.form = { key: m.key, day: day,   // план 019: часы новой смены — из графика на этот день (D-51)
+      vals: s ? { r: s.r, as: s.as, ab: s.ab, mp: s.mp, me: s.me, h: s.h }
+        : { r: 0, as: 0, ab: 0, mp: 0, me: 0, h: schedHours(data, m, day) || data.dh } };
   }
   function updateTotal() {
     var el = document.getElementById("form-total"), m = shown();
@@ -721,6 +848,16 @@
       if (!hp) { alertMsg("Часы — от 0 до 744."); return; }
       vibe();
       go(data.bot, hp);
+    }
+    else if (b.dataset.gnav) { state.gview = b.dataset.gnav; haptic(); draw(); }   // план 019: ‹ › в «📅 Мой график»
+    else if (b.dataset.gfix) {   // «Внести» пропущенную смену — форма на этот день в календаре «📊 Статистики»
+      var fd = +b.dataset.gfix, cm = data.cal[data.cal.length - 1];
+      state.tab = "stat"; state.view = "cur"; state.sel.cur = fd; state.payOpen = null;
+      openForm(cm, fd);
+      haptic();
+      draw();
+      var cal = app.querySelector(".cal");
+      if (cal) cal.scrollIntoView({ block: "start" });
     }
     else if (b.dataset.unit) { state.unit = b.dataset.unit; draw(); }
     else if (b.dataset.nav) { state.view = b.dataset.nav; state.form = null; state.payOpen = null; draw(); }
@@ -828,5 +965,6 @@
 
   draw();
   window.PaydayMiniApp = { parseHash: parseHash, readData: readData, shifts: shifts, shiftParam: shiftParam, payParam: payParam,
-    rateParam: rateParam, packsParam: packsParam, hoursParam: hoursParam, readProfile: readProfile };
+    rateParam: rateParam, packsParam: packsParam, hoursParam: hoursParam, readProfile: readProfile, readSched: readSched,
+    b64text: b64text };
 })();
